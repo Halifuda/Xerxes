@@ -1,0 +1,4 @@
+#!/bin/bash
+
+cmake --build build --target Xerxes
+build/Xerxes
