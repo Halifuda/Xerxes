@@ -9,6 +9,9 @@
 #define HOSTQ 8
 #define HOSTD 0
 #define PKTTY xerxes::PacketType::NT_RD
+// Bus def.
+#define BWIDTH 64
+#define FRAMING 20
 // DRAM def.
 #define CAPA (64 * 500)
 #define GRAIN 10
@@ -27,7 +30,7 @@ int main() {
   auto host = xerxes::Host{sim.topology(), HOSTQ, SNOOP, CNT, HOSTD};
   // auto snoop =
   // xerxes::Snoop{sim.topology(), LINEN, ASSOC, new xerxes::Snoop::FIFO{}};
-  auto bus = xerxes::DuplexBus{sim.topology(), false, 1, 64, 2};
+  auto bus = xerxes::DuplexBus{sim.topology(), false, 1, BWIDTH, FRAMING};
   auto mem0 = xerxes::DRAMsim3Interface{
       sim.topology(), 1,      0, "DRAMsim3/configs/DDR4_8Gb_x8_3200.ini",
       "output",       "DRAM0"};
