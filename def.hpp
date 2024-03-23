@@ -55,6 +55,7 @@ typedef enum {
   SNOOP_EVICT_DELAY,
   HOST_INV_DELAY,
   DRAM_INTERFACE_QUEUING_DELAY,
+  DEVICE_PROCESS_TIME,
   DRAM_TIME,
   NUM_STATS
 } NormalStatType;
@@ -80,6 +81,8 @@ public:
       return std::string("host inv delay");
     case DRAM_INTERFACE_QUEUING_DELAY:
       return std::string("dram interface queuing delay");
+    case DEVICE_PROCESS_TIME:
+      return std::string("device process time");
     case DRAM_TIME:
       return std::string("dram time");
     default:
@@ -266,6 +269,7 @@ public:
   uint64_t step() {
     if (!notifiers.empty()) {
       auto tick = notifiers.begin()->first;
+      Logger::debug() << "Notifier step at " << tick << std::endl;
       auto data = notifiers.begin()->second;
       notifiers.erase(notifiers.begin());
       func(data);

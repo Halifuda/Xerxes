@@ -4,6 +4,7 @@
 #include "device.hpp"
 #include "utils.hpp"
 
+#include <random>
 #include <set>
 
 namespace xerxes {
@@ -19,10 +20,13 @@ private:
       Addr cur;
     };
     std::vector<EndPoint> end_points;
+    std::random_device rd;
+    std::ranlux48 gen;
+    std::uniform_real_distribution<> dis;
     size_t cur = 0;
 
   public:
-    Interleaving() {}
+    Interleaving() { dis = std::uniform_real_distribution<>(0, 1); }
     size_t size() { return end_points.size(); }
     void push_back(EndPoint ep) {
       ep.cur = ep.start;
@@ -36,14 +40,10 @@ private:
       return res;
     }
     std::pair<TopoID, Addr> next() {
-      while (end_points[cur].cur >=
-             end_points[cur].start + end_points[cur].capacity) {
-        cur = (cur + 1) % end_points.size();
-      }
       auto id = end_points[cur].id;
-      auto addr = end_points[cur].cur;
-      // TODO: step size
-      end_points[cur].cur += 64;
+      auto addr =
+          Addr(floor(double(end_points[cur].capacity) / 64 * dis(gen))) * 64 +
+          end_points[cur].start;
       cur = (cur + 1) % end_points.size();
       return {id, addr};
     }
@@ -71,7 +71,9 @@ private:
   IssueQueue q;
   Tick snoop_time;
   Tick cur = 0;
+  Tick last_arrive = 0;
   size_t count;
+  size_t cur_cnt = 0;
   Tick delay;
 
 public:
@@ -92,8 +94,7 @@ public:
       if (pkt.is_rsp) {
         Logger::debug() << name_ << " receive packet " << pkt.id
                         << ", issue queue is full? " << q.full() << std::endl;
-        if (q.full())
-          cur = pkt.arrive;
+        last_arrive = pkt.arrive;
         q.pop(pkt);
         pkt.log_stat();
       } else if (pkt.type == INV) {
@@ -110,9 +111,19 @@ public:
     send_pkt(pkt);
   }
 
+  void log_stats(std::ostream &os) override {
+    os << "Host stats: " << std::endl;
+    os << "Issued packets: " << cur_cnt << std::endl;
+    // TODO: cnt -> bytes
+    os << "Bandwidth (GB/s): " << (double)(cur_cnt * 64) / (double)(last_arrive)
+       << std::endl;
+  }
+
   bool step(PacketType type) {
-    if (count > 0 && end_points.has_next()) {
+    if (cur_cnt < count && end_points.has_next()) {
       if (q.full()) {
+        if (cur < last_arrive)
+          cur = last_arrive;
         return false;
       }
       auto pair = end_points.next();
@@ -130,13 +141,13 @@ public:
       addr += 64;
       q.push(pkt);
       send_pkt(pkt);
-      count--;
+      cur_cnt++;
       return true;
     }
     return false;
   }
 
-  bool all_issued() { return count == 0; }
+  bool all_issued() { return cur_cnt == count; }
   bool q_empty() { return q.empty(); }
 };
 } // namespace xerxes

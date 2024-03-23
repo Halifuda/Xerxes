@@ -2,8 +2,6 @@
 #include "def.hpp"
 #include "device.hpp"
 
-#include <vector>
-
 namespace xerxes {
 class Switch : public Device {
 private:

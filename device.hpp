@@ -48,5 +48,7 @@ public:
     }
     send_pkt(pkt);
   }
+
+  virtual void log_stats(std::ostream &os) {}
 };
 } // namespace xerxes

@@ -18,6 +18,7 @@ private:
 
   Tick tick_per_clock;
   Tick interface_clock = 0;
+  Tick process_time;
 
   dramsim3::MemorySystem memsys;
 
@@ -26,11 +27,10 @@ private:
     for (auto it = pending.begin(); it != pending.end(); ++it) {
       auto &pkt = *it;
       // Tick to the packet arrival
-      while (interface_clock < pkt.arrive) {
+      while ((interface_clock * tick_per_clock) < pkt.arrive) {
         memsys.ClockTick();
         ++interface_clock;
       }
-      // TODO: issue delay
       if (memsys.WillAcceptTransaction(pkt.addr - start, pkt.is_write())) {
         if (issued.find(pkt.addr) == issued.end())
           issued[pkt.addr] = std::list<Packet>();
@@ -38,7 +38,7 @@ private:
         to_erase.push_back(it);
         pkt.delta_stat(DRAM_INTERFACE_QUEUING_DELAY,
                        (double)(interface_clock * tick_per_clock - pkt.arrive));
-        pkt.arrive = interface_clock * tick_per_clock;
+        pkt.arrive += interface_clock * tick_per_clock;
         memsys.AddTransaction(pkt.addr - start, pkt.is_write());
       }
     }
@@ -49,10 +49,12 @@ private:
 
 public:
   DRAMsim3Interface(Topology *topology, const Tick tick_per_clock,
-                    const Addr start, const std::string &config_file,
+                    const Tick process_time, const Addr start,
+                    const std::string &config_file,
                     const std::string &output_dir,
                     std::string name = "DRAMsim3Interface")
       : Device(topology, name), start(start), tick_per_clock(tick_per_clock),
+        process_time(process_time),
         memsys(config_file, output_dir,
                std::bind(&DRAMsim3Interface::callback, this,
                          std::placeholders::_1),
@@ -67,6 +69,8 @@ public:
       if (pkt.dst == self) {
         Logger::debug() << name_ << " receive packet " << pkt.id << " from "
                         << pkt.from << " at " << pkt.arrive << std::endl;
+        pkt.delta_stat(DEVICE_PROCESS_TIME, (double)(process_time));
+        pkt.arrive += process_time;
         pending.push_back(pkt);
       } else {
         send_pkt(pkt);
@@ -77,13 +81,12 @@ public:
   }
 
   void callback(Addr addr) {
-    Logger::debug() << "Callback 0x" << std::hex << addr << std::dec << " at "
-                    << std::dec << interface_clock * tick_per_clock
-                    << std::endl;
     auto it = issued.find(addr + start);
     if (it == issued.end())
       return;
     auto &pkt = it->second.front();
+    Logger::debug() << "Callback #" << pkt.id << "r at "
+                    << interface_clock * tick_per_clock << std::endl;
     std::swap(pkt.src, pkt.dst);
 
     // TODO: is the callback called at the exact tick?
@@ -98,9 +101,10 @@ public:
       issued.erase(it); // Save memory
   }
 
-  void clock() {
+  Tick clock() {
     memsys.ClockTick();
     ++interface_clock;
+    return interface_clock * tick_per_clock;
   }
 
   bool clock_until() {
