@@ -8,7 +8,7 @@
 #define CNT (1000 * MEMCNT + HOSTQ)
 #define HOSTQ (16 * MEMCNT)
 #define HOSTD 0
-#define PACKAGE_NUM 3
+#define PACKAGE_NUM 4
 // Bus def.
 #define IS_FULL true
 #define HALFT 15
@@ -32,8 +32,8 @@
 #define LOGLEVEL xerxes::LogLevel::INFO
 #define RATIO 0
 #define MEMCNT 32
-char OUTPUT[] = "output/bus_pkg3_mem32.csv";
-char STATS_OUT[] = "output/bus_pkg3_mem32.txt";
+char OUTPUT[] = "output/bus_pkg4_mem32.csv";
+char STATS_OUT[] = "output/bus_pkg4_mem32.txt";
 char CONFIG[] = "output/dram.ini";
 
 int main() {
