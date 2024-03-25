@@ -41,7 +41,8 @@ public:
             Tick delay_per_T, size_t width, Tick framing_time = 20,
             size_t frame_size = 256, std::string name = "DuplexBus")
       : Device(topology, name), is_full(is_full), half_rev_time(half_rev_time),
-        delay_per_T(delay_per_T), width(width), frame_size(frame_size),
+        delay_per_T(delay_per_T), width(width / 8),
+        frame_size(frame_size), // width: bit -> byte
         framing_time(framing_time) {
     stats.insert(std::make_pair("Transfered_bytes", 0));
     stats.insert(std::make_pair("Transfered_payloads", 0));
@@ -54,7 +55,8 @@ public:
     Logger::debug() << name_ << " transit packet " << pkt.id << std::endl;
     auto to = topology->next_node(self, pkt.dst);
     auto route_tick = get_or_init_route_tick(pkt.from, to->id(), pkt.arrive);
-    size_t frame = (pkt.payload + frame_size - 1) / frame_size;
+    size_t frame = (pkt.payload + frame_size) /
+                   frame_size; // absolute ceil (frames have some overheads)
     auto delay = ((frame * frame_size + width - 1) / width) * delay_per_T;
     route_tick = std::max(route_tick, pkt.arrive);
     pkt.delta_stat(BUS_QUEUE_DELAY, (double)(route_tick - pkt.arrive));

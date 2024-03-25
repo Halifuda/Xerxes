@@ -94,6 +94,10 @@ public:
                    (double)(interface_clock * tick_per_clock - pkt.arrive));
     pkt.arrive = interface_clock * tick_per_clock;
     pkt.is_rsp = true;
+    if (pkt.is_write())
+      pkt.payload = 0;
+    else
+      pkt.payload = 64;
     send_pkt(pkt);
 
     it->second.pop_front();

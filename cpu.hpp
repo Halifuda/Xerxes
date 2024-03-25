@@ -133,14 +133,16 @@ public:
       auto ep = pair.first;
       auto addr = pair.second;
       cur += delay;
-      auto pkt = PktBuilder()
-                     .src(self)
-                     .dst(ep)
-                     .addr(addr)
-                     .sent(cur)
-                     .payload(64)
-                     .type(type)
-                     .build();
+      auto pkt =
+          PktBuilder()
+              .src(self)
+              .dst(ep)
+              .addr(addr)
+              .sent(cur)
+              .payload(type == PacketType::NT_WT || type == PacketType::WT ? 64
+                                                                           : 0)
+              .type(type)
+              .build();
       addr += 64;
       q.push(pkt);
       send_pkt(pkt);

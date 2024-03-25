@@ -5,16 +5,19 @@
 #include <iostream>
 
 // Issuing def.
-#define CNT (2000 + HOSTQ)
-#define HOSTQ 80
+#define MEMCNT 8
+#define CNT (1000 * MEMCNT + HOSTQ)
+#define HOSTQ (16 * MEMCNT)
 #define HOSTD 0
 // Bus def.
 #define IS_FULL true
 #define HALFT 15
 #define TPERT 1
-#define BWIDTH 64
+#define BYTE_WIDTH 64
+#define BWIDTH (8 * BYTE_WIDTH)
 #define FRAMING 40
-#define SWITCH 40
+// Switch def.
+#define SWITCH 0 // oracle
 // DRAM def.
 #define CAPA (64 * 500)
 #define CLOCK 1
@@ -43,37 +46,24 @@ int main() {
   auto bus =
       xerxes::DuplexBus{sim.topology(), IS_FULL, HALFT, TPERT, BWIDTH, FRAMING};
   auto sw = xerxes::Switch{sim.topology(), SWITCH, "switch"};
-  auto mem0 = xerxes::DRAMsim3Interface{sim.topology(), CLOCK,    PROCE, 0,
-                                        CONFIG,         "output", "mem0"};
-  auto mem1 = xerxes::DRAMsim3Interface{sim.topology(), CLOCK,    PROCE, CAPA,
-                                        CONFIG,         "output", "mem1"};
-  auto mem2 = xerxes::DRAMsim3Interface{
-      sim.topology(), CLOCK, PROCE, CAPA * 2, CONFIG, "output", "mem2"};
-  auto mem3 = xerxes::DRAMsim3Interface{
-      sim.topology(), CLOCK, PROCE, CAPA * 3, CONFIG, "output", "mem3"};
+  std::vector<xerxes::DRAMsim3Interface *> mems;
+  for (int i = 0; i < 6; ++i) {
+    mems.push_back(new xerxes::DRAMsim3Interface{
+        sim.topology(), CLOCK, PROCE, CAPA * (xerxes::Addr)(i), CONFIG,
+        "output", "mem" + std::to_string(i)});
+  }
 
   // Make topology by `add_dev()` and `add_edge()`.
   // Use `build_route()` to acctually build route table.
   // Use `set_entry()` to set the entry point of the simulation.
-  sim.system()
-      ->add_dev(&host)
-      ->add_dev(&bus)
-      ->add_dev(&sw)
-      ->add_dev(&snoop)
-      ->add_dev(&mem0)
-      ->add_dev(&mem1)
-      ->add_dev(&mem2)
-      ->add_dev(&mem3);
-  sim.topology()
-      ->add_edge(host.id(), bus.id())
-      ->add_edge(bus.id(), snoop.id())
-      ->add_edge(snoop.id(), mem0.id());
-  /*
-  ->add_edge(bus.id(), sw.id())
-  ->add_edge(sw.id(), mem0.id())
-  ->add_edge(sw.id(), mem1.id())
-  ->add_edge(sw.id(), mem2.id())
-  ->add_edge(sw.id(), mem3.id());*/
+  sim.system()->add_dev(&host)->add_dev(&bus)->add_dev(&sw)->add_dev(&snoop);
+  for (auto mem : mems) {
+    sim.system()->add_dev(mem);
+  }
+  sim.topology()->add_edge(host.id(), bus.id())->add_edge(bus.id(), sw.id());
+  for (auto mem : mems) {
+    sim.topology()->add_edge(sw.id(), mem->id());
+  }
   sim.topology()->build_route();
   sim.set_entry(host.id());
 
@@ -123,18 +113,15 @@ int main() {
   xerxes::global_init(notifier_func, fout, LOGLEVEL, pkt_logger);
 
   // Add end points to the host.
-  host.add_end_point(mem0.id(), 0, CAPA, true);
-  // host.add_end_point(mem1.id(), CAPA, CAPA);
-  // host.add_end_point(mem2.id(), CAPA * 2, CAPA);
-  // host.add_end_point(mem3.id(), CAPA * 3, CAPA);
+  for (size_t i = 0; i < mems.size(); ++i) {
+    host.add_end_point(mems[i]->id(), CAPA * i, CAPA * (i + 1), true);
+  }
 
   // Add topology to the switch.
-  // sw.add_upstream(host.id());
-  // sw.add_downstream(mem0.id());
-  // sw.add_downstream(mem1.id());
-  // sw.add_downstream(mem2.id());
-  // sw.add_downstream(mem3.id());
-
+  sw.add_upstream(host.id());
+  for (auto mem : mems) {
+    sw.add_downstream(mem->id());
+  }
   auto &notifier = *xerxes::Notifier::glb();
   auto issue_cnt = 0;
   auto ratio = RATIO;
@@ -155,24 +142,21 @@ int main() {
     auto rem = notifier.step();
     xerxes::Logger::debug() << "Notifier remind " << rem << std::endl;
     if (!res) {
-      mem0.clock_until();
-      mem1.clock_until();
-      mem2.clock_until();
-      mem3.clock_until();
+      for (auto mem : mems) {
+        mem->clock_until();
+      }
     }
   }
   auto clock_cnt = 0;
   while (!host.q_empty() && (clock_cnt++) < MAX_CLOCK) {
     notifier.step();
-    mem0.clock_until();
-    mem1.clock_until();
-    mem2.clock_until();
-    mem3.clock_until();
+    for (auto mem : mems) {
+      mem->clock_until();
+    }
     for (int i = 0; i < GRAIN; ++i) {
-      mem0.clock();
-      mem1.clock();
-      mem2.clock();
-      mem3.clock();
+      for (auto mem : mems) {
+        mem->clock();
+      }
     }
   }
 
