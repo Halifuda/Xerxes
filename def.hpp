@@ -52,6 +52,7 @@ typedef enum {
   FRAMING_TIME,
   SWITCH_QUEUE_DELAY,
   SWITCH_TIME,
+  PACKAGING_DELAY,
   SNOOP_EVICT_DELAY,
   HOST_INV_DELAY,
   DRAM_INTERFACE_QUEUING_DELAY,
@@ -75,6 +76,8 @@ public:
       return std::string("framing time");
     case SWITCH_TIME:
       return std::string("switch time");
+    case PACKAGING_DELAY:
+      return std::string("packaging delay");
     case SNOOP_EVICT_DELAY:
       return std::string("snoop evict delay");
     case HOST_INV_DELAY:
@@ -118,19 +121,21 @@ struct Packet {
   TopoID src;      /* Source device */
   TopoID dst;      /* Destination device */
   bool is_rsp;     /* Is response */
+  bool is_sub_pkt; /* Is sub-packet, uses 0 time in bus (packaged by former) */
 
   Packet()
       : id(-1), type(PKT_TYPE_NUM), addr(0), payload(0), sent(0), arrive(0),
-        from(-1), src(-1), dst(-1), is_rsp(false) {}
+        from(-1), src(-1), dst(-1), is_rsp(false), is_sub_pkt(false) {}
   Packet(PktID id, PacketType type, Addr addr, size_t size, Tick sent,
-         Tick arrive, TopoID from, TopoID src, TopoID dst, bool is_rsp)
+         Tick arrive, TopoID from, TopoID src, TopoID dst, bool is_rsp,
+         bool is_sub_pkt)
       : id(id), type(type), addr(addr), payload(size), sent(sent),
         arrive(std::max(sent, arrive)), from(from), src(src), dst(dst),
-        is_rsp(is_rsp) {}
+        is_rsp(is_rsp), is_sub_pkt(is_sub_pkt) {}
   Packet(const Packet &pkt)
       : id(pkt.id), type(pkt.type), addr(pkt.addr), payload(pkt.payload),
         sent(pkt.sent), arrive(pkt.arrive), from(pkt.from), src(pkt.src),
-        dst(pkt.dst), is_rsp(pkt.is_rsp) {}
+        dst(pkt.dst), is_rsp(pkt.is_rsp), is_sub_pkt(pkt.is_sub_pkt) {}
 
   /**
    * @brief Check if the packet is a write request.
@@ -192,11 +197,12 @@ private:
   TopoID src_i;
   TopoID dst_i;
   bool is_rsp_i;
+  bool is_sub_pkt_i;
 
 public:
   PktBuilder()
       : type_i(PKT_TYPE_NUM), addr_i(0), payload_i(0), sent_i(0), arrive_i(0),
-        from_i(-1), src_i(-1), dst_i(-1), is_rsp_i(false) {
+        from_i(-1), src_i(-1), dst_i(-1), is_rsp_i(false), is_sub_pkt_i(false) {
     // Automate the packet ID
     static PktID id = 0;
     id_i = id++;
@@ -238,9 +244,13 @@ public:
     is_rsp_i = is_rsp;
     return *this;
   }
+  PktBuilder &is_sub_pkt(bool is_sub_pkt) {
+    is_sub_pkt_i = is_sub_pkt;
+    return *this;
+  }
   Packet build() {
     return Packet(id_i, type_i, addr_i, payload_i, sent_i, arrive_i, from_i,
-                  src_i, dst_i, is_rsp_i);
+                  src_i, dst_i, is_rsp_i, is_sub_pkt_i);
   }
 };
 
@@ -269,7 +279,7 @@ public:
   uint64_t step() {
     if (!notifiers.empty()) {
       auto tick = notifiers.begin()->first;
-      Logger::debug() << "Notifier step at " << tick << std::endl;
+      Logger::warn() << "Notifier step at " << tick << std::endl;
       auto data = notifiers.begin()->second;
       notifiers.erase(notifiers.begin());
       func(data);

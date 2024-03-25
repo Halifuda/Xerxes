@@ -4,6 +4,7 @@
 #include "topo.hpp"
 
 // All devices.
+#include "burst_packge.hpp"
 #include "bus.hpp"
 #include "cpu.hpp"
 #include "dramsim3_interface.hpp"

@@ -3,12 +3,56 @@
 #include "device.hpp"
 
 #include <algorithm>
+#include <climits>
 #include <map>
 
 namespace xerxes {
 class DuplexBus : public Device {
 private:
-  std::map<TopoID, std::map<TopoID, Tick>> routes;
+  class Timeline {
+  public:
+    struct Scope {
+      Tick start;
+      Tick end;
+      bool operator<(const Scope &rhs) const { return end < rhs.end; }
+      Tick len() { return end > start ? end - start : 0; }
+    };
+
+    std::map<Tick, Scope> scopes;
+
+    Tick transfer_time(Tick arrive, Tick delay) {
+      Logger::debug() << "Timeline transfer time: " << arrive << ", delay "
+                      << delay << std::endl;
+      auto it = scopes.lower_bound(arrive);
+      while (it->second.end - std::max(it->second.start, arrive) < delay &&
+             it != scopes.end()) {
+        Logger::debug() << "Skip scope " << it->second.start << "-"
+                        << it->second.end << std::endl;
+        it++;
+      }
+      ASSERT(it != scopes.end(), "Cannot find scope");
+      Logger::debug() << "Use scope " << it->second.start << "-"
+                      << it->second.end << std::endl;
+      auto &scope = it->second;
+      auto left = Scope{scope.start, std::max(scope.start, arrive)};
+      auto right = Scope{std::max(scope.start, arrive) + delay, scope.end};
+      auto ret = std::max(scope.start, arrive);
+      scopes.erase(it);
+      if (left.len() > 0) {
+        Logger::debug() << "Insert new scope " << left.start << "-" << left.end
+                        << std::endl;
+        scopes[left.end] = left;
+      }
+      if (right.len() > 0) {
+        Logger::debug() << "Insert new scope " << right.start << "-"
+                        << right.end << std::endl;
+        scopes[right.end] = right;
+      }
+      return ret;
+    }
+  };
+
+  std::map<TopoID, std::map<TopoID, Timeline>> routes;
   bool is_full;
   Tick half_rev_time;
   // Packet total delay = delay_per_T * size / width
@@ -19,19 +63,19 @@ private:
 
   std::map<std::string, double> stats;
 
-  Tick get_or_init_route_tick(TopoID from, TopoID to, Tick current) {
+  Timeline &get_or_init_route(TopoID from, TopoID to) {
     if (!is_full && from > to) {
       // shared by both directions
       std::swap(from, to);
+      stats["Direction reverse count"] += 1;
     }
     if (routes.find(from) == routes.end()) {
-      routes[from] = std::map<TopoID, Tick>();
-      if (routes[from].find(to) == routes[from].end())
-        routes[from][to] = current;
-    }
-    if (!is_full) {
-      routes[from][to] += half_rev_time;
-      stats["Direction reverse count"] += 1;
+      routes[from] = std::map<TopoID, Timeline>();
+      if (routes[from].find(to) == routes[from].end()) {
+        routes[from][to] = Timeline{};
+        routes[from][to].scopes.insert(
+            std::make_pair(INT_MAX, Timeline::Scope{0, INT_MAX}));
+      }
     }
     return routes[from][to];
   }
@@ -54,20 +98,30 @@ public:
     auto pkt = receive_pkt();
     Logger::debug() << name_ << " transit packet " << pkt.id << std::endl;
     auto to = topology->next_node(self, pkt.dst);
-    auto route_tick = get_or_init_route_tick(pkt.from, to->id(), pkt.arrive);
-    size_t frame = (pkt.payload + frame_size) /
-                   frame_size; // absolute ceil (frames have some overheads)
+    // absolute ceil (frames have some overheads)
+    size_t frame = (pkt.payload + frame_size) / frame_size;
+    if (pkt.is_sub_pkt) {
+      // Sub packet is packaged with former, no need to add delay.
+      pkt.is_sub_pkt = false;
+      stats["Transfered_bytes"] += frame * frame_size;
+      stats["Transfered_payloads"] += pkt.payload;
+      log_transit_normal(pkt);
+      send_pkt(pkt);
+      return;
+    }
+    auto &route = get_or_init_route(pkt.from, to->id());
     auto delay = ((frame * frame_size + width - 1) / width) * delay_per_T;
-    route_tick = std::max(route_tick, pkt.arrive);
-    pkt.delta_stat(BUS_QUEUE_DELAY, (double)(route_tick - pkt.arrive));
+    auto rev = is_full ? 0 : half_rev_time;
+    auto transfer_time = route.transfer_time(pkt.arrive + rev, delay);
+
+    pkt.delta_stat(BUS_QUEUE_DELAY, (double)(transfer_time - pkt.arrive));
     pkt.delta_stat(FRAMING_TIME, (double)framing_time);
     Logger::debug() << "[BQD #" << pkt.id << (pkt.is_rsp ? 'r' : ' ')
-                    << "]: " << route_tick << " - " << pkt.arrive << " = "
-                    << (double)(route_tick - pkt.arrive) << std::endl;
+                    << "]: " << transfer_time << " - " << pkt.arrive << " = "
+                    << (double)(transfer_time - pkt.arrive) << std::endl;
     pkt.delta_stat(BUS_TIME, (double)delay);
 
-    pkt.arrive = route_tick + delay;
-    routes[pkt.from][to->id()] = pkt.arrive;
+    pkt.arrive = transfer_time + delay;
     pkt.arrive += framing_time; // Donot include framing time in routing time
 
     stats["Transfered_bytes"] += frame * frame_size;

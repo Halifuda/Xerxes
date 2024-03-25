@@ -106,8 +106,16 @@ public:
   }
 
   Tick clock() {
+    auto num = issued.size();
+    if (num == 0) {
+      if (!pending.empty())
+        issue();
+      return interface_clock * tick_per_clock;
+    }
     memsys.ClockTick();
     ++interface_clock;
+    if (num != issued.size() && !pending.empty())
+      issue();
     return interface_clock * tick_per_clock;
   }
 

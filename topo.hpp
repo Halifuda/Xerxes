@@ -28,8 +28,6 @@ public:
   }
 
   bool send(Packet pkt) {
-    if (pkt.id == 14)
-      Logger::debug() << "14!" << std::endl;
     auto tick = pkt.arrive;
     buffer.push_back(pkt);
     Notifier::glb()->add(tick, (void *)(this->self));
