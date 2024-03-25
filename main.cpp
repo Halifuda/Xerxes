@@ -6,9 +6,11 @@
 
 // Issuing def.
 #define CNT (2000 + HOSTQ)
-#define HOSTQ 32
+#define HOSTQ 80
 #define HOSTD 0
 // Bus def.
+#define IS_FULL true
+#define HALFT 15
 #define TPERT 1
 #define BWIDTH 64
 #define FRAMING 40
@@ -21,12 +23,13 @@
 #define MAX_CLOCK 10000
 // Snoop def.
 #define SNOOP 20
-#define LINEN 7
-#define ASSOC 1
+#define LINEN 128
+#define ASSOC 16
 
+#define LOGLEVEL xerxes::LogLevel::INFO
 #define RATIO 1
-char OUTPUT[] = "output/half_q.csv";
-char STATS_OUT[] = "output/half_q.txt";
+char OUTPUT[] = "output/snoop.csv";
+char STATS_OUT[] = "output/snoop.txt";
 char CONFIG[] = "output/dram.ini";
 
 int main() {
@@ -35,9 +38,10 @@ int main() {
 
   // Make devices.
   auto host = xerxes::Host{sim.topology(), HOSTQ, SNOOP, CNT, HOSTD};
-  // auto snoop =
-  // xerxes::Snoop{sim.topology(), LINEN, ASSOC, new xerxes::Snoop::FIFO{}};
-  auto bus = xerxes::DuplexBus{sim.topology(), false, TPERT, BWIDTH, FRAMING};
+  auto snoop = xerxes::Snoop{
+      sim.topology(), LINEN, ASSOC, new xerxes::Snoop::FIFO{}, false, "snoop0"};
+  auto bus =
+      xerxes::DuplexBus{sim.topology(), IS_FULL, HALFT, TPERT, BWIDTH, FRAMING};
   auto sw = xerxes::Switch{sim.topology(), SWITCH, "switch"};
   auto mem0 = xerxes::DRAMsim3Interface{sim.topology(), CLOCK,    PROCE, 0,
                                         CONFIG,         "output", "mem0"};
@@ -55,17 +59,21 @@ int main() {
       ->add_dev(&host)
       ->add_dev(&bus)
       ->add_dev(&sw)
+      ->add_dev(&snoop)
       ->add_dev(&mem0)
       ->add_dev(&mem1)
       ->add_dev(&mem2)
       ->add_dev(&mem3);
   sim.topology()
       ->add_edge(host.id(), bus.id())
-      ->add_edge(bus.id(), sw.id())
-      ->add_edge(sw.id(), mem0.id())
-      ->add_edge(sw.id(), mem1.id())
-      ->add_edge(sw.id(), mem2.id())
-      ->add_edge(sw.id(), mem3.id());
+      ->add_edge(bus.id(), snoop.id())
+      ->add_edge(snoop.id(), mem0.id());
+  /*
+  ->add_edge(bus.id(), sw.id())
+  ->add_edge(sw.id(), mem0.id())
+  ->add_edge(sw.id(), mem1.id())
+  ->add_edge(sw.id(), mem2.id())
+  ->add_edge(sw.id(), mem3.id());*/
   sim.topology()->build_route();
   sim.set_entry(host.id());
 
@@ -81,10 +89,10 @@ int main() {
 
   // Build a packet logger, triggered when a packet calls `log_stats()`.
   std::fstream fout = std::fstream(OUTPUT, std::ios::out);
-  fout
-      << "id,type,addr,sent,arrive,device_process_time,dram_q_time,dram_time,"
-         "framing_time,bus_q_time,bus_time,switch_q_time,switch_time,total_time"
-      << std::endl;
+  fout << "id,type,addr,sent,arrive,device_process_time,dram_q_time,dram_time,"
+          "framing_time,bus_q_time,bus_time,switch_q_time,switch_time,snoop_"
+          "evict_time,host_inv_time,total_time"
+       << std::endl;
   auto pkt_logger = [&](const xerxes::Packet &pkt) {
     auto log_stat = [&](xerxes::NormalStatType stat) {
       if (pkt.has_stat(stat) > 0) {
@@ -105,18 +113,27 @@ int main() {
     log_stat(xerxes::BUS_TIME);
     log_stat(xerxes::SWITCH_QUEUE_DELAY);
     log_stat(xerxes::SWITCH_TIME);
+    log_stat(xerxes::SNOOP_EVICT_DELAY);
+    log_stat(xerxes::HOST_INV_DELAY);
     xerxes::Logger::info() << "," << pkt.arrive - pkt.sent << std::endl;
   };
 
   // Initialize the global utils, including notifier, logger stream, log level,
   // pkt logger.
-  xerxes::global_init(notifier_func, fout, xerxes::LogLevel::INFO, pkt_logger);
+  xerxes::global_init(notifier_func, fout, LOGLEVEL, pkt_logger);
 
   // Add end points to the host.
-  host.add_end_point(mem0.id(), 0, CAPA);
+  host.add_end_point(mem0.id(), 0, CAPA, true);
   // host.add_end_point(mem1.id(), CAPA, CAPA);
   // host.add_end_point(mem2.id(), CAPA * 2, CAPA);
   // host.add_end_point(mem3.id(), CAPA * 3, CAPA);
+
+  // Add topology to the switch.
+  // sw.add_upstream(host.id());
+  // sw.add_downstream(mem0.id());
+  // sw.add_downstream(mem1.id());
+  // sw.add_downstream(mem2.id());
+  // sw.add_downstream(mem3.id());
 
   auto &notifier = *xerxes::Notifier::glb();
   auto issue_cnt = 0;
@@ -125,17 +142,18 @@ int main() {
   while (!host.all_issued()) {
     bool res = false;
     if (ratio == 0) {
-      res = host.step(xerxes::PacketType::NT_RD);
+      res = host.step(xerxes::PacketType::RD);
     } else if (ratio == -1) {
-      res = host.step(xerxes::PacketType::NT_WT);
+      res = host.step(xerxes::PacketType::WT);
     } else {
       res = host.step((issue_cnt / 4) % (ratio + 1) == ratio
-                          ? xerxes::PacketType::NT_WT
-                          : xerxes::PacketType::NT_RD);
+                          ? xerxes::PacketType::WT
+                          : xerxes::PacketType::RD);
     }
     issue_cnt += (int)(res);
     xerxes::Logger::debug() << "Host step " << res << std::endl;
-    notifier.step();
+    auto rem = notifier.step();
+    xerxes::Logger::debug() << "Notifier remind " << rem << std::endl;
     if (!res) {
       mem0.clock_until();
       mem1.clock_until();

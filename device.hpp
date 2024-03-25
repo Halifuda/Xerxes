@@ -27,6 +27,11 @@ protected:
     return pkt;
   }
 
+  void show_all_pkt() {
+    Logger::debug() << name_ << " has packets: ";
+    topology->get_node(self)->show_all_pkt();
+  }
+
   void log_transit_normal(const Packet &pkt) {
     Logger::debug() << name_ << "#" << self << " transit packet " << pkt.id
                     << " from " << pkt.from << " to " << pkt.dst << " at "

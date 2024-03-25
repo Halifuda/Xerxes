@@ -17,6 +17,7 @@ private:
       TopoID id;
       Addr start;
       size_t capacity;
+      bool is_random;
       Addr cur;
     };
     std::vector<EndPoint> end_points;
@@ -32,18 +33,20 @@ private:
       ep.cur = ep.start;
       end_points.push_back(ep);
     }
-    bool has_next() {
-      bool res = false;
-      for (auto &ep : end_points) {
-        res |= ep.cur < ep.start + ep.capacity;
-      }
-      return res;
-    }
     std::pair<TopoID, Addr> next() {
       auto id = end_points[cur].id;
-      auto addr =
-          Addr(floor(double(end_points[cur].capacity) / 64 * dis(gen))) * 64 +
-          end_points[cur].start;
+      Addr addr = 0;
+      if (end_points[cur].is_random) {
+        addr =
+            Addr(floor(double(end_points[cur].capacity) / 64 * dis(gen))) * 64 +
+            end_points[cur].start;
+      } else {
+        addr = end_points[cur].cur;
+        end_points[cur].cur += 64;
+        if (end_points[cur].cur >=
+            end_points[cur].start + end_points[cur].capacity)
+          end_points[cur].cur = end_points[cur].start;
+      }
       cur = (cur + 1) % end_points.size();
       return {id, addr};
     }
@@ -78,12 +81,12 @@ private:
 
 public:
   Host(Topology *topology, size_t q_capacity, Tick snoop_time, size_t count,
-       Tick delay, std::string name = "Host")
+       Tick delay, bool is_random = false, std::string name = "Host")
       : Device(topology, name), q(q_capacity), snoop_time(snoop_time),
         count(count), delay(delay) {}
 
-  Host &add_end_point(TopoID id, Addr start, size_t capacity) {
-    end_points.push_back({id, start, capacity});
+  Host &add_end_point(TopoID id, Addr start, size_t capacity, bool is_random) {
+    end_points.push_back({id, start, capacity, is_random});
     return *this;
   }
 
@@ -120,7 +123,7 @@ public:
   }
 
   bool step(PacketType type) {
-    if (cur_cnt < count && end_points.has_next()) {
+    if (cur_cnt < count) {
       if (q.full()) {
         if (cur < last_arrive)
           cur = last_arrive;

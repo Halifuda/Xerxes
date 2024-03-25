@@ -247,7 +247,7 @@ public:
 typedef std::function<void(void *)> NotifierFunc;
 
 class Notifier {
-  std::map<uint64_t, void *> notifiers;
+  std::multimap<uint64_t, void *> notifiers;
   NotifierFunc func;
 
 public:
@@ -273,7 +273,7 @@ public:
       auto data = notifiers.begin()->second;
       notifiers.erase(notifiers.begin());
       func(data);
-      return tick;
+      return notifiers.size();
     }
     return 0;
   }

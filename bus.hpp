@@ -10,6 +10,7 @@ class DuplexBus : public Device {
 private:
   std::map<TopoID, std::map<TopoID, Tick>> routes;
   bool is_full;
+  Tick half_rev_time;
   // Packet total delay = delay_per_T * size / width
   Tick delay_per_T;
   size_t width;
@@ -28,21 +29,29 @@ private:
       if (routes[from].find(to) == routes[from].end())
         routes[from][to] = current;
     }
+    if (!is_full) {
+      routes[from][to] += half_rev_time;
+      stats["Direction reverse count"] += 1;
+    }
     return routes[from][to];
   }
 
 public:
-  DuplexBus(Topology *topology, bool is_full, Tick delay_per_T, size_t width,
-            Tick framing_time = 20, size_t frame_size = 256,
-            std::string name = "DuplexBus")
-      : Device(topology, name), is_full(is_full), delay_per_T(delay_per_T),
-        width(width), frame_size(frame_size), framing_time(framing_time) {
+  DuplexBus(Topology *topology, bool is_full, Tick half_rev_time,
+            Tick delay_per_T, size_t width, Tick framing_time = 20,
+            size_t frame_size = 256, std::string name = "DuplexBus")
+      : Device(topology, name), is_full(is_full), half_rev_time(half_rev_time),
+        delay_per_T(delay_per_T), width(width), frame_size(frame_size),
+        framing_time(framing_time) {
     stats.insert(std::make_pair("Transfered_bytes", 0));
     stats.insert(std::make_pair("Transfered_payloads", 0));
+    stats.insert(std::make_pair("Direction reverse count", 0));
   }
 
   void transit() override {
+    show_all_pkt();
     auto pkt = receive_pkt();
+    Logger::debug() << name_ << " transit packet " << pkt.id << std::endl;
     auto to = topology->next_node(self, pkt.dst);
     auto route_tick = get_or_init_route_tick(pkt.from, to->id(), pkt.arrive);
     size_t frame = (pkt.payload + frame_size - 1) / frame_size;

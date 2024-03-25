@@ -3,7 +3,7 @@
 #include <iostream>
 
 namespace xerxes {
-enum LogLevel { NONE = 0, INFO = 1, DEBUG = 2, WARN = 3, ERROR = 4 };
+enum LogLevel { NONE = 0, INFO = 1, TEMP = 2, DEBUG = 3, WARN = 4, ERROR = 5 };
 
 class Logger {
 private:
@@ -43,6 +43,7 @@ public:
     get_or_set(true, os, level);
   }
   static Logger &info() { return get_or_set() << INFO; }
+  static Logger &temp() { return get_or_set() << TEMP; }
   static Logger &debug() { return get_or_set() << DEBUG; }
   static Logger &warn() { return get_or_set() << WARN; }
   static Logger &error() { return get_or_set() << ERROR; }

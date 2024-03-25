@@ -4,6 +4,7 @@
 #include "utils.hpp"
 
 #include <iostream>
+#include <list>
 #include <queue>
 #include <set>
 
@@ -13,24 +14,32 @@ class TopoNode {
 
   TopoID self;
   std::set<TopoID> neighbors;
-  std::queue<Packet> buffer;
+  std::list<Packet> buffer;
 
 public:
   bool receive(Packet &pkt) {
     // TODO
     if (!buffer.empty()) {
       pkt = buffer.front();
-      buffer.pop();
+      buffer.pop_front();
       return true;
     }
     return false;
   }
 
   bool send(Packet pkt) {
+    if (pkt.id == 14)
+      Logger::debug() << "14!" << std::endl;
     auto tick = pkt.arrive;
-    buffer.push(pkt);
+    buffer.push_back(pkt);
     Notifier::glb()->add(tick, (void *)(this->self));
     return true;
+  }
+
+  void show_all_pkt() {
+    for (auto &pkt : buffer)
+      Logger::debug() << pkt.id << " ";
+    Logger::debug() << std::endl;
   }
 
   TopoID id() { return self; }
