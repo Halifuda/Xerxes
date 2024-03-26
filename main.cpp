@@ -6,9 +6,11 @@
 
 // Issuing def.
 #define CNT (1000 * MEMCNT + HOSTQ)
-#define HOSTQ 100
+#define HOSTQ (16 * MEMCNT)
 #define HOSTD 0
 #define PACKAGE_NUM 1
+#define BURST 3
+#define RANDOM false
 // Bus def.
 #define IS_FULL true
 #define HALFT 15
@@ -17,7 +19,7 @@
 #define BWIDTH (8 * BYTE_WIDTH)
 #define FRAMING 40
 // Switch def.
-#define SWITCH 20 // oracle
+#define SWITCH 0 // 0 means oracle
 // DRAM def.
 #define CAPA (64 * 500)
 #define CLOCK 1
@@ -31,9 +33,9 @@
 
 #define LOGLEVEL xerxes::LogLevel::INFO
 #define RATIO 0
-#define MEMCNT 2
-char OUTPUT[] = "output/bus_mem2.csv";
-char STATS_OUT[] = "output/bus_mem2.txt";
+#define MEMCNT 16
+char OUTPUT[] = "output/bus_mem3.csv";
+char STATS_OUT[] = "output/bus_mem3.txt";
 char CONFIG[] = "output/dram.ini";
 
 int main() {
@@ -41,7 +43,7 @@ int main() {
   auto sim = xerxes::Simulation{};
 
   // Make devices.
-  auto host = xerxes::Host{sim.topology(), HOSTQ, SNOOP, CNT, HOSTD};
+  auto host = xerxes::Host{sim.topology(), HOSTQ, SNOOP, CNT, HOSTD, BURST};
   auto snoop = xerxes::Snoop{
       sim.topology(), LINEN, ASSOC, new xerxes::Snoop::FIFO{}, false, "snoop0"};
   auto bus =
@@ -52,7 +54,10 @@ int main() {
 
   auto sw = xerxes::Switch{sim.topology(), SWITCH, "switch"};
   std::vector<xerxes::DRAMsim3Interface *> mems;
+  std::vector<xerxes::BurstHandler *> bursts;
   for (int i = 0; i < MEMCNT; ++i) {
+    bursts.push_back(
+        new xerxes::BurstHandler{sim.topology(), "burst" + std::to_string(i)});
     mems.push_back(new xerxes::DRAMsim3Interface{
         sim.topology(), CLOCK, PROCE, CAPA * (xerxes::Addr)(i), CONFIG,
         "output", "mem" + std::to_string(i)});
@@ -62,8 +67,9 @@ int main() {
   // Use `build_route()` to acctually build route table.
   // Use `set_entry()` to set the entry point of the simulation.
   sim.system()->add_dev(&host)->add_dev(&bus)->add_dev(&sw)->add_dev(&snoop);
-  for (auto mem : mems) {
-    sim.system()->add_dev(mem);
+  for (auto i = 0; i < MEMCNT; ++i) {
+    sim.system()->add_dev(bursts[i]);
+    sim.system()->add_dev(mems[i]);
   }
   sim.system()->add_dev(&pkg0)->add_dev(&pkg1);
 
@@ -72,8 +78,9 @@ int main() {
       ->add_edge(pkg0.id(), bus.id())
       ->add_edge(bus.id(), pkg1.id())
       ->add_edge(pkg1.id(), sw.id());
-  for (auto mem : mems) {
-    sim.topology()->add_edge(sw.id(), mem->id());
+  for (auto i = 0; i < MEMCNT; ++i) {
+    sim.topology()->add_edge(sw.id(), bursts[i]->id());
+    sim.topology()->add_edge(bursts[i]->id(), mems[i]->id());
   }
   sim.topology()->build_route();
   sim.set_entry(host.id());
@@ -90,10 +97,20 @@ int main() {
 
   // Build a packet logger, triggered when a packet calls `log_stats()`.
   std::fstream fout = std::fstream(OUTPUT, std::ios::out);
-  fout << "id,type,mem_id,addr,sent,arrive,device_process_time,dram_q_time,"
-          "dram_time,framing_time,packaging_delay,bus_q_time,bus_time,switch_q_"
-          "time,switch_time,snoop_evict_time,host_inv_time,total_time"
-       << std::endl;
+  fout << "id,type,mem_id,addr,sent,arrive,"
+       << "device_process_time,"
+       << "dram_q_time,"
+       << "dram_time,"
+       << "framing_time,"
+       << "packaging_delay,"
+       << "wait_burst,"
+       << "bus_q_time,"
+       << "bus_time,"
+       << "switch_q_time,"
+       << "switch_time,"
+       << "snoop_evict_time,"
+       << "host_inv_time,"
+       << "total_time" << std::endl;
   auto pkt_logger = [&](const xerxes::Packet &pkt) {
     auto log_stat = [&](xerxes::NormalStatType stat) {
       if (pkt.has_stat(stat) > 0) {
@@ -111,6 +128,7 @@ int main() {
     log_stat(xerxes::DRAM_TIME);
     log_stat(xerxes::FRAMING_TIME);
     log_stat(xerxes::PACKAGING_DELAY);
+    log_stat(xerxes::WAIT_ALL_BURST);
     log_stat(xerxes::BUS_QUEUE_DELAY);
     log_stat(xerxes::BUS_TIME);
     log_stat(xerxes::SWITCH_QUEUE_DELAY);
@@ -126,7 +144,7 @@ int main() {
 
   // Add end points to the host.
   for (size_t i = 0; i < mems.size(); ++i) {
-    host.add_end_point(mems[i]->id(), CAPA * i, CAPA * (i + 1), true);
+    host.add_end_point(mems[i]->id(), CAPA * i, CAPA * (i + 1), RANDOM);
   }
 
   // Add topology to the switch.
@@ -134,6 +152,11 @@ int main() {
   for (auto mem : mems) {
     sw.add_downstream(mem->id());
   }
+
+  // Add topology to packaging.
+  pkg0.add_upstream(host.id());
+  pkg1.add_upstream(sw.id());
+
   auto &notifier = *xerxes::Notifier::glb();
   auto issue_cnt = 0;
   auto ratio = RATIO;

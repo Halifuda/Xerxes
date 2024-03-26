@@ -45,6 +45,8 @@ public:
     stats.insert(std::make_pair("Transfered_bytes", 0));
     stats.insert(std::make_pair("Transfered_payloads", 0));
     stats.insert(std::make_pair("Direction reverse count", 0));
+    stats.insert(std::make_pair("Sent sub-packet count", 0));
+    stats.insert(std::make_pair("Sent non-sub-packet count", 0));
   }
 
   void transit() override {
@@ -52,17 +54,19 @@ public:
     auto pkt = receive_pkt();
     Logger::debug() << name_ << " transit packet " << pkt.id << std::endl;
     auto to = topology->next_node(self, pkt.dst);
-    // absolute ceil (frames have some overheads)
-    size_t frame = (pkt.payload + frame_size) / frame_size;
+
     if (pkt.is_sub_pkt) {
       // Sub packet is packaged with former, no need to add delay.
       pkt.is_sub_pkt = false;
-      stats["Transfered_bytes"] += frame * frame_size;
       stats["Transfered_payloads"] += pkt.payload;
+      stats["Sent sub-packet count"] += 1;
       log_transit_normal(pkt);
       send_pkt(pkt);
       return;
     }
+
+    // absolute ceil (frames have some overheads)
+    size_t frame = (pkt.payload + frame_size) / frame_size;
     auto &route = get_or_init_route(pkt.from, to->id());
     auto delay = ((frame * frame_size + width - 1) / width) * delay_per_T;
     auto rev = is_full ? 0 : half_rev_time;
@@ -80,6 +84,7 @@ public:
 
     stats["Transfered_bytes"] += frame * frame_size;
     stats["Transfered_payloads"] += pkt.payload;
+    stats["Sent non-sub-packet count"] += 1;
 
     log_transit_normal(pkt);
     send_pkt(pkt);

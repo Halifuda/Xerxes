@@ -25,9 +25,12 @@ private:
     std::ranlux48 gen;
     std::uniform_real_distribution<> dis;
     size_t cur = 0;
+    size_t block_size;
 
   public:
-    Interleaving() { dis = std::uniform_real_distribution<>(0, 1); }
+    Interleaving(size_t block_size = 64) : block_size(block_size) {
+      dis = std::uniform_real_distribution<>(0, 1);
+    }
     size_t size() { return end_points.size(); }
     void push_back(EndPoint ep) {
       ep.cur = ep.start;
@@ -37,12 +40,13 @@ private:
       auto id = end_points[cur].id;
       Addr addr = 0;
       if (end_points[cur].is_random) {
-        addr =
-            Addr(floor(double(end_points[cur].capacity) / 64 * dis(gen))) * 64 +
-            end_points[cur].start;
+        addr = Addr(floor(double(end_points[cur].capacity) / block_size *
+                          dis(gen))) *
+                   block_size +
+               end_points[cur].start;
       } else {
         addr = end_points[cur].cur;
-        end_points[cur].cur += 64;
+        end_points[cur].cur += block_size;
         if (end_points[cur].cur >=
             end_points[cur].start + end_points[cur].capacity)
           end_points[cur].cur = end_points[cur].start;
@@ -78,13 +82,16 @@ private:
   size_t count;
   size_t cur_cnt = 0;
   Tick delay;
+  size_t burst_size = 1;
+  size_t block_size = 64;
   double sum_latency = 0;
 
 public:
   Host(Topology *topology, size_t q_capacity, Tick snoop_time, size_t count,
-       Tick delay, bool is_random = false, std::string name = "Host")
+       Tick delay, size_t burst_size = 1, std::string name = "Host")
       : Device(topology, name), q(q_capacity), snoop_time(snoop_time),
-        count(count), delay(delay) {}
+        count(count), delay(delay), burst_size(burst_size),
+        block_size(burst_size * 64) {}
 
   Host &add_end_point(TopoID id, Addr start, size_t capacity, bool is_random) {
     end_points.push_back({id, start, capacity, is_random});
@@ -105,7 +112,7 @@ public:
       } else if (pkt.type == INV) {
         std::swap(pkt.src, pkt.dst);
         pkt.is_rsp = true;
-        pkt.payload = 64;
+        pkt.payload = block_size;
         pkt.arrive += snoop_time;
         pkt.delta_stat(NormalStatType::HOST_INV_DELAY, snoop_time);
         send_pkt(pkt);
@@ -120,7 +127,8 @@ public:
     os << "Host stats: " << std::endl;
     os << "Issued packets: " << cur_cnt << std::endl;
     // TODO: cnt -> bytes
-    os << "Bandwidth (GB/s): " << (double)(cur_cnt * 64) / (double)(last_arrive)
+    os << "Bandwidth (GB/s): "
+       << (double)(cur_cnt * 64 * burst_size) / (double)(last_arrive)
        << std::endl;
     os << "Average latency: " << sum_latency / cur_cnt << std::endl;
   }
@@ -142,11 +150,12 @@ public:
               .dst(ep)
               .addr(addr)
               .sent(cur)
-              .payload(type == PacketType::NT_WT || type == PacketType::WT ? 64
-                                                                           : 0)
+              .payload(type == PacketType::NT_WT || type == PacketType::WT
+                           ? block_size
+                           : 0)
+              .burst(burst_size)
               .type(type)
               .build();
-      addr += 64;
       q.push(pkt);
       send_pkt(pkt);
       cur_cnt++;

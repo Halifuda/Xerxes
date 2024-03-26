@@ -54,6 +54,7 @@ typedef enum {
   SWITCH_QUEUE_DELAY,
   SWITCH_TIME,
   PACKAGING_DELAY,
+  WAIT_ALL_BURST,
   SNOOP_EVICT_DELAY,
   HOST_INV_DELAY,
   DRAM_INTERFACE_QUEUING_DELAY,
@@ -79,6 +80,8 @@ public:
       return std::string("switch time");
     case PACKAGING_DELAY:
       return std::string("packaging delay");
+    case WAIT_ALL_BURST:
+      return std::string("wait all burst");
     case SNOOP_EVICT_DELAY:
       return std::string("snoop evict delay");
     case HOST_INV_DELAY:
@@ -116,6 +119,7 @@ struct Packet {
   PacketType type; /* Packet type */
   Addr addr;       /* Address */
   size_t payload;  /* Payload size (in bytes) */
+  size_t burst;    /* Burst size */
   Tick sent;       /* Sent time */
   Tick arrive;     /* Arrive time */
   TopoID from;     /* From (on-trans) */
@@ -125,18 +129,20 @@ struct Packet {
   bool is_sub_pkt; /* Is sub-packet, uses 0 time in bus (packaged by former) */
 
   Packet()
-      : id(-1), type(PKT_TYPE_NUM), addr(0), payload(0), sent(0), arrive(0),
-        from(-1), src(-1), dst(-1), is_rsp(false), is_sub_pkt(false) {}
-  Packet(PktID id, PacketType type, Addr addr, size_t size, Tick sent,
-         Tick arrive, TopoID from, TopoID src, TopoID dst, bool is_rsp,
-         bool is_sub_pkt)
-      : id(id), type(type), addr(addr), payload(size), sent(sent),
+      : id(-1), type(PKT_TYPE_NUM), addr(0), payload(0), burst(1), sent(0),
+        arrive(0), from(-1), src(-1), dst(-1), is_rsp(false),
+        is_sub_pkt(false) {}
+  Packet(PktID id, PacketType type, Addr addr, size_t size, size_t burst,
+         Tick sent, Tick arrive, TopoID from, TopoID src, TopoID dst,
+         bool is_rsp, bool is_sub_pkt)
+      : id(id), type(type), addr(addr), payload(size), burst(burst), sent(sent),
         arrive(std::max(sent, arrive)), from(from), src(src), dst(dst),
         is_rsp(is_rsp), is_sub_pkt(is_sub_pkt) {}
   Packet(const Packet &pkt)
       : id(pkt.id), type(pkt.type), addr(pkt.addr), payload(pkt.payload),
-        sent(pkt.sent), arrive(pkt.arrive), from(pkt.from), src(pkt.src),
-        dst(pkt.dst), is_rsp(pkt.is_rsp), is_sub_pkt(pkt.is_sub_pkt) {}
+        burst(pkt.burst), sent(pkt.sent), arrive(pkt.arrive), from(pkt.from),
+        src(pkt.src), dst(pkt.dst), is_rsp(pkt.is_rsp),
+        is_sub_pkt(pkt.is_sub_pkt) {}
 
   /**
    * @brief Check if the packet is a write request.
@@ -192,6 +198,7 @@ private:
   PacketType type_i;
   Addr addr_i;
   size_t payload_i;
+  size_t burst_i;
   Tick sent_i;
   Tick arrive_i;
   TopoID from_i;
@@ -202,8 +209,9 @@ private:
 
 public:
   PktBuilder()
-      : type_i(PKT_TYPE_NUM), addr_i(0), payload_i(0), sent_i(0), arrive_i(0),
-        from_i(-1), src_i(-1), dst_i(-1), is_rsp_i(false), is_sub_pkt_i(false) {
+      : type_i(PKT_TYPE_NUM), addr_i(0), payload_i(0), burst_i(1), sent_i(0),
+        arrive_i(0), from_i(-1), src_i(-1), dst_i(-1), is_rsp_i(false),
+        is_sub_pkt_i(false) {
     // Automate the packet ID
     static PktID id = 0;
     id_i = id++;
@@ -221,6 +229,10 @@ public:
   }
   PktBuilder &payload(size_t payload) {
     payload_i = payload;
+    return *this;
+  }
+  PktBuilder &burst(size_t burst) {
+    burst_i = burst;
     return *this;
   }
   PktBuilder &sent(Tick sent) {
@@ -250,8 +262,8 @@ public:
     return *this;
   }
   Packet build() {
-    return Packet(id_i, type_i, addr_i, payload_i, sent_i, arrive_i, from_i,
-                  src_i, dst_i, is_rsp_i, is_sub_pkt_i);
+    return Packet(id_i, type_i, addr_i, payload_i, burst_i, sent_i, arrive_i,
+                  from_i, src_i, dst_i, is_rsp_i, is_sub_pkt_i);
   }
 };
 

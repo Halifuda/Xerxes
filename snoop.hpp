@@ -144,7 +144,7 @@ private:
       auto inv = PktBuilder()
                      .type(PacketType::INV)
                      .addr(line.addr)
-                     .payload(256)
+                     .payload(64)
                      .sent(tick)
                      .arrive(0)
                      .src(self)
