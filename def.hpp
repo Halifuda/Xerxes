@@ -1,6 +1,7 @@
 #pragma once
 #include "utils.hpp"
 
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -286,6 +287,51 @@ public:
       return notifiers.size();
     }
     return 0;
+  }
+};
+
+class Timeline {
+public:
+  struct Scope {
+    Tick start;
+    Tick end;
+    bool operator<(const Scope &rhs) const { return end < rhs.end; }
+    Tick len() { return end > start ? end - start : 0; }
+  };
+
+  std::map<Tick, Scope> scopes;
+
+  Timeline() { scopes[INT_MAX] = Scope{0, INT_MAX}; }
+
+  Tick transfer_time(Tick arrive, Tick delay) {
+    Logger::debug() << "Timeline transfer time: " << arrive << ", delay "
+                    << delay << std::endl;
+    auto it = scopes.lower_bound(arrive);
+    while (it->second.end - std::max(it->second.start, arrive) < delay &&
+           it != scopes.end()) {
+      Logger::debug() << "Skip scope " << it->second.start << "-"
+                      << it->second.end << std::endl;
+      it++;
+    }
+    ASSERT(it != scopes.end(), "Cannot find scope");
+    Logger::debug() << "Use scope " << it->second.start << "-" << it->second.end
+                    << std::endl;
+    auto &scope = it->second;
+    auto left = Scope{scope.start, std::max(scope.start, arrive)};
+    auto right = Scope{std::max(scope.start, arrive) + delay, scope.end};
+    auto ret = std::max(scope.start, arrive);
+    scopes.erase(it);
+    if (left.len() > 0) {
+      Logger::debug() << "Insert new scope " << left.start << "-" << left.end
+                      << std::endl;
+      scopes[left.end] = left;
+    }
+    if (right.len() > 0) {
+      Logger::debug() << "Insert new scope " << right.start << "-" << right.end
+                      << std::endl;
+      scopes[right.end] = right;
+    }
+    return ret;
   }
 };
 } // namespace xerxes

@@ -78,6 +78,7 @@ private:
   size_t count;
   size_t cur_cnt = 0;
   Tick delay;
+  double sum_latency = 0;
 
 public:
   Host(Topology *topology, size_t q_capacity, Tick snoop_time, size_t count,
@@ -98,6 +99,7 @@ public:
         Logger::debug() << name_ << " receive packet " << pkt.id
                         << ", issue queue is full? " << q.full() << std::endl;
         last_arrive = pkt.arrive;
+        sum_latency += pkt.arrive - pkt.sent;
         q.pop(pkt);
         pkt.log_stat();
       } else if (pkt.type == INV) {
@@ -120,6 +122,7 @@ public:
     // TODO: cnt -> bytes
     os << "Bandwidth (GB/s): " << (double)(cur_cnt * 64) / (double)(last_arrive)
        << std::endl;
+    os << "Average latency: " << sum_latency / cur_cnt << std::endl;
   }
 
   bool step(PacketType type) {

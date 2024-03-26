@@ -6,9 +6,9 @@
 
 // Issuing def.
 #define CNT (1000 * MEMCNT + HOSTQ)
-#define HOSTQ (16 * MEMCNT)
+#define HOSTQ 100
 #define HOSTD 0
-#define PACKAGE_NUM 4
+#define PACKAGE_NUM 1
 // Bus def.
 #define IS_FULL true
 #define HALFT 15
@@ -17,7 +17,7 @@
 #define BWIDTH (8 * BYTE_WIDTH)
 #define FRAMING 40
 // Switch def.
-#define SWITCH 0 // oracle
+#define SWITCH 20 // oracle
 // DRAM def.
 #define CAPA (64 * 500)
 #define CLOCK 1
@@ -31,9 +31,9 @@
 
 #define LOGLEVEL xerxes::LogLevel::INFO
 #define RATIO 0
-#define MEMCNT 32
-char OUTPUT[] = "output/bus_pkg4_mem32.csv";
-char STATS_OUT[] = "output/bus_pkg4_mem32.txt";
+#define MEMCNT 2
+char OUTPUT[] = "output/bus_mem2.csv";
+char STATS_OUT[] = "output/bus_mem2.txt";
 char CONFIG[] = "output/dram.ini";
 
 int main() {

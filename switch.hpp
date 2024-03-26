@@ -8,8 +8,7 @@ private:
   Tick delay;
   std::unordered_map<TopoID, TopoID> upstreams;
   std::unordered_map<TopoID, TopoID> downstreams;
-  std::unordered_map<TopoID, Tick> upstream_delays;
-  std::unordered_map<TopoID, Tick> downstream_delays;
+  std::unordered_map<TopoID, Timeline> downstream_queues;
 
   struct StreamInfo {
     TopoID up;
@@ -51,7 +50,7 @@ public:
     }
     if (upstreams.find(host) == upstreams.end()) {
       upstreams[host] = to->id();
-      upstream_delays[host] = 0;
+      // upstream_queues[host] = Timeline{};
     }
   }
 
@@ -62,7 +61,7 @@ public:
     }
     if (downstreams.find(ep) == downstreams.end()) {
       downstreams[ep] = to->id();
-      downstream_delays[ep] = 0;
+      downstream_queues[ep] = Timeline{};
     }
   }
 
@@ -75,12 +74,14 @@ public:
 
     auto info = get_streams(pkt);
     if (info.is_down) {
-      if (pkt.arrive < downstream_delays[info.down]) {
-        auto qd = downstream_delays[info.down] - pkt.arrive;
+      auto &queue = downstream_queues[info.down];
+      auto transfer_time = queue.transfer_time(pkt.arrive, delay);
+
+      if (pkt.arrive < transfer_time) {
+        auto qd = transfer_time - pkt.arrive;
         pkt.delta_stat(SWITCH_QUEUE_DELAY, (double)(qd));
-        pkt.arrive = downstream_delays[info.down];
       }
-      downstream_delays[info.down] = pkt.arrive + delay;
+      pkt.arrive = transfer_time;
     } // TODO: ignore upstream queuing
     pkt.delta_stat(SWITCH_TIME, (double)(delay));
     pkt.arrive += delay;
