@@ -4,70 +4,142 @@
 #include <fstream>
 #include <iostream>
 
-// Issuing def.
-#define CNT (1000 * MEMCNT + HOSTQ)
-#define HOSTQ (16 * MEMCNT)
-#define HOSTD 0
-#define PACKAGE_NUM 1
-#define BURST 3
-#define RANDOM false
-// Bus def.
-#define IS_FULL true
-#define HALFT 15
-#define TPERT 1
-#define BYTE_WIDTH 32
-#define BWIDTH (8 * BYTE_WIDTH)
-#define FRAMING 40
-// Switch def.
-#define SWITCH 0 // 0 means oracle
-// DRAM def.
-#define CAPA (64 * 500)
-#define CLOCK 1
-#define PROCE 40
-#define GRAIN 10
-#define MAX_CLOCK 10000
-// Snoop def.
-#define SNOOP 20
-#define LINEN 128
-#define ASSOC 16
+struct EpochConfig {
+  // Issueing def.
+  size_t cnt;
+  size_t hostq;
+  size_t hostd;
+  size_t package_num;
+  size_t burst;
+  bool random;
+  // Bus def.
+  bool is_full;
+  size_t halft;
+  size_t tpert;
+  size_t byte_width;
+  size_t bwidth;
+  size_t framing;
+  // Switch def.
+  size_t switch_;
+  // DRAM def.
+  size_t capa;
+  size_t clock;
+  size_t proce;
+  int grain;
+  int max_clock;
+  std::string config;
+  // Snoop def.
+  size_t snoop;
+  size_t linen;
+  size_t assoc;
+  // Epoch def.
+  xerxes::LogLevel loglevel;
+  int ratio;
+  int memcnt;
+  std::string output;
+  std::string stats_out;
+};
 
-#define LOGLEVEL xerxes::LogLevel::INFO
-#define RATIO 0
-#define MEMCNT 16
-char OUTPUT[] = "output/bus_mem3.csv";
-char STATS_OUT[] = "output/bus_mem3.txt";
-char CONFIG[] = "output/dram.ini";
+void epoch(EpochConfig &);
 
 int main() {
+  auto hostq = [](int memcnt) {
+    return memcnt == 1   ? 8
+           : memcnt == 2 ? 20
+           : memcnt == 4 ? 48
+           : memcnt == 8 ? 128
+                         : 16 * memcnt;
+  };
+  auto output = [](size_t burst, int memcnt) {
+    return "output/bus_burst" + std::to_string(burst) + "_mem" +
+           std::to_string(memcnt) + ".csv";
+  };
+  auto stats_out = [](size_t burst, int memcnt) {
+    return "output/bus_burst" + std::to_string(burst) + "_mem" +
+           std::to_string(memcnt) + ".txt";
+  };
+  size_t burst = 4;
+  auto config = EpochConfig{0,
+                            0,
+                            0,
+                            1,
+                            burst,
+                            false,
+                            true,
+                            15,
+                            1,
+                            32,
+                            8 * 32,
+                            40,
+                            0,
+                            (64 * 500),
+                            1,
+                            40,
+                            10,
+                            10000,
+                            "output/dram.ini",
+                            20,
+                            128,
+                            16,
+                            xerxes::LogLevel::INFO,
+                            0,
+                            0,
+                            "",
+                            ""};
+
+  auto do_epoch = [&](size_t memcnt) {
+    config.memcnt = memcnt;
+    config.hostq = hostq(memcnt);
+    config.cnt = 1000 * config.memcnt + config.hostq;
+    config.output = output(burst, memcnt);
+    config.stats_out = stats_out(burst, memcnt);
+    std::cout << "Doing epoch [memcnt=" << memcnt << "]..." << std::flush;
+    epoch(config);
+    std::cout << "Done." << std::endl;
+  };
+
+  do_epoch(1);
+  do_epoch(2);
+  do_epoch(4);
+  do_epoch(8);
+  do_epoch(16);
+  do_epoch(32);
+  return 0;
+}
+
+void epoch(EpochConfig &config) {
   // Make simulation skeleton.
   auto sim = xerxes::Simulation{};
 
   // Make devices.
-  auto host = xerxes::Host{sim.topology(), HOSTQ, SNOOP, CNT, HOSTD, BURST};
-  auto snoop = xerxes::Snoop{
-      sim.topology(), LINEN, ASSOC, new xerxes::Snoop::FIFO{}, false, "snoop0"};
-  auto bus =
-      xerxes::DuplexBus{sim.topology(), IS_FULL, HALFT, TPERT, BWIDTH, FRAMING};
+  auto host = xerxes::Host{sim.topology(), config.hostq, config.snoop,
+                           config.cnt,     config.hostd, config.burst};
+  auto snoop_evict = new xerxes::Snoop::FIFO{};
+  auto snoop = xerxes::Snoop{sim.topology(), config.linen, config.assoc,
+                             snoop_evict,    false,        "snoop0"};
+  auto bus = xerxes::DuplexBus{sim.topology(), config.is_full, config.halft,
+                               config.tpert,   config.bwidth,  config.framing};
 
-  auto pkg0 = xerxes::Packaging{sim.topology(), PACKAGE_NUM, "package0"};
-  auto pkg1 = xerxes::Packaging{sim.topology(), PACKAGE_NUM, "package1"};
+  auto pkg0 = xerxes::Packaging{sim.topology(), config.package_num, "package0"};
+  auto pkg1 = xerxes::Packaging{sim.topology(), config.package_num, "package1"};
 
-  auto sw = xerxes::Switch{sim.topology(), SWITCH, "switch"};
+  auto sw = xerxes::Switch{sim.topology(), config.switch_, "switch"};
   std::vector<xerxes::DRAMsim3Interface *> mems;
   std::vector<xerxes::BurstHandler *> bursts;
-  for (int i = 0; i < MEMCNT; ++i) {
+  for (int i = 0; i < config.memcnt; ++i) {
     bursts.push_back(
         new xerxes::BurstHandler{sim.topology(), "burst" + std::to_string(i)});
     mems.push_back(new xerxes::DRAMsim3Interface{
-        sim.topology(), CLOCK, PROCE, CAPA * (xerxes::Addr)(i), CONFIG,
-        "output", "mem" + std::to_string(i)});
+        sim.topology(), config.clock, config.proce,
+        config.capa * (xerxes::Addr)(i), config.config, "output",
+        "mem" + std::to_string(i)});
   }
 
   // Make topology by `add_dev()` and `add_edge()`.
   // Use `build_route()` to acctually build route table.
   // Use `set_entry()` to set the entry point of the simulation.
   sim.system()->add_dev(&host)->add_dev(&bus)->add_dev(&sw)->add_dev(&snoop);
-  for (auto i = 0; i < MEMCNT; ++i) {
+  for (auto i = 0; i < config.memcnt; ++i) {
     sim.system()->add_dev(bursts[i]);
     sim.system()->add_dev(mems[i]);
   }
@@ -78,7 +150,7 @@ int main() {
       ->add_edge(pkg0.id(), bus.id())
       ->add_edge(bus.id(), pkg1.id())
       ->add_edge(pkg1.id(), sw.id());
-  for (auto i = 0; i < MEMCNT; ++i) {
+  for (auto i = 0; i < config.memcnt; ++i) {
     sim.topology()->add_edge(sw.id(), bursts[i]->id());
     sim.topology()->add_edge(bursts[i]->id(), mems[i]->id());
   }
@@ -96,7 +168,7 @@ int main() {
   };
 
   // Build a packet logger, triggered when a packet calls `log_stats()`.
-  std::fstream fout = std::fstream(OUTPUT, std::ios::out);
+  std::fstream fout = std::fstream(config.output, std::ios::out);
   fout << "id,type,mem_id,addr,sent,arrive,"
        << "device_process_time,"
        << "dram_q_time,"
@@ -140,11 +212,12 @@ int main() {
 
   // Initialize the global utils, including notifier, logger stream, log level,
   // pkt logger.
-  xerxes::global_init(notifier_func, fout, LOGLEVEL, pkt_logger);
+  xerxes::global_init(notifier_func, fout, config.loglevel, pkt_logger);
 
   // Add end points to the host.
   for (size_t i = 0; i < mems.size(); ++i) {
-    host.add_end_point(mems[i]->id(), CAPA * i, CAPA * (i + 1), RANDOM);
+    host.add_end_point(mems[i]->id(), config.capa * i, config.capa * (i + 1),
+                       config.random);
   }
 
   // Add topology to the switch.
@@ -159,7 +232,7 @@ int main() {
 
   auto &notifier = *xerxes::Notifier::glb();
   auto issue_cnt = 0;
-  auto ratio = RATIO;
+  auto ratio = config.ratio;
 
   while (!host.all_issued()) {
     bool res = false;
@@ -175,7 +248,7 @@ int main() {
     issue_cnt += (int)(res);
     notifier.step();
     if (!res) {
-      for (int i = 0; i < GRAIN; ++i) {
+      for (int i = 0; i < config.grain; ++i) {
         for (auto mem : mems) {
           mem->clock();
         }
@@ -183,9 +256,9 @@ int main() {
     }
   }
   auto clock_cnt = 0;
-  while (!host.q_empty() && (clock_cnt++) < MAX_CLOCK) {
+  while (!host.q_empty() && (clock_cnt++) < config.max_clock) {
     notifier.step();
-    for (int i = 0; i < GRAIN; ++i) {
+    for (int i = 0; i < config.grain; ++i) {
       for (auto mem : mems) {
         mem->clock();
       }
@@ -193,9 +266,7 @@ int main() {
   }
 
   // Log the statistics of the devices.
-  std::fstream stats_out = std::fstream(STATS_OUT, std::ios::out);
+  std::fstream stats_out = std::fstream(config.stats_out, std::ios::out);
   host.log_stats(stats_out);
   bus.log_stats(stats_out);
-
-  return 0;
 }

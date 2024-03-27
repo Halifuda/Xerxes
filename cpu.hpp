@@ -84,14 +84,21 @@ private:
   Tick delay;
   size_t burst_size = 1;
   size_t block_size = 64;
-  double sum_latency = 0;
+
+  std::unordered_map<std::string, double> stats;
 
 public:
   Host(Topology *topology, size_t q_capacity, Tick snoop_time, size_t count,
        Tick delay, size_t burst_size = 1, std::string name = "Host")
       : Device(topology, name), q(q_capacity), snoop_time(snoop_time),
         count(count), delay(delay), burst_size(burst_size),
-        block_size(burst_size * 64) {}
+        block_size(burst_size * 64) {
+    stats["Bandwidth"] = 0;
+    stats["Average latency"] = 0;
+    stats["Average wait on bus"] = 0;
+    stats["Average wait for packaging"] = 0;
+    stats["Average wait burst"] = 0;
+  }
 
   Host &add_end_point(TopoID id, Addr start, size_t capacity, bool is_random) {
     end_points.push_back({id, start, capacity, is_random});
@@ -106,7 +113,17 @@ public:
         Logger::debug() << name_ << " receive packet " << pkt.id
                         << ", issue queue is full? " << q.full() << std::endl;
         last_arrive = pkt.arrive;
-        sum_latency += pkt.arrive - pkt.sent;
+
+        // Update stats
+        stats["Bandwidth"] += pkt.burst * 64;
+        stats["Average latency"] += pkt.arrive - pkt.sent;
+        stats["Average wait on bus"] +=
+            pkt.get_stat(NormalStatType::BUS_QUEUE_DELAY);
+        stats["Average wait for packaging"] +=
+            pkt.get_stat(NormalStatType::PACKAGING_DELAY);
+        stats["Average wait burst"] +=
+            pkt.get_stat(NormalStatType::WAIT_ALL_BURST);
+
         q.pop(pkt);
         pkt.log_stat();
       } else if (pkt.type == INV) {
@@ -127,10 +144,16 @@ public:
     os << "Host stats: " << std::endl;
     os << "Issued packets: " << cur_cnt << std::endl;
     // TODO: cnt -> bytes
-    os << "Bandwidth (GB/s): "
-       << (double)(cur_cnt * 64 * burst_size) / (double)(last_arrive)
+    os << "Bandwidth (GB/s): " << stats["Bandwidth"] / (double)(last_arrive)
        << std::endl;
-    os << "Average latency: " << sum_latency / cur_cnt << std::endl;
+    os << "Average latency (ns): " << stats["Average latency"] / (double)cur_cnt
+       << std::endl;
+    os << "Average wait on bus (ns): "
+       << stats["Average wait on bus"] / (double)cur_cnt << std::endl;
+    os << "Average wait for packaging (ns): "
+       << stats["Average wait for packaging"] / (double)cur_cnt << std::endl;
+    os << "Average wait burst time (ns): "
+       << stats["Average wait burst"] / (double)cur_cnt << std::endl;
   }
 
   bool step(PacketType type) {

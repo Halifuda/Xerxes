@@ -82,7 +82,7 @@ public:
   void transit() override {
     auto pkt = receive_pkt();
     Logger::debug() << name_ << " receive packet " << pkt.id << std::endl;
-    if (pkt.type == INV || pkt.type == CORUPT) {
+    if (pkt.type == INV || pkt.type == CORUPT || pkt.burst <= 1) {
       send_pkt(pkt);
       return;
     }
