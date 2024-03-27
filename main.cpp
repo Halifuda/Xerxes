@@ -43,35 +43,19 @@ struct EpochConfig {
 void epoch(EpochConfig &);
 
 int main() {
-  auto hostq = [](int memcnt) {
-    return memcnt == 1   ? 8
-           : memcnt == 2 ? 20
-           : memcnt == 4 ? 48
-           : memcnt == 8 ? 128
-                         : 16 * memcnt;
-  };
-  auto output = [](size_t burst, int memcnt) {
-    return "output/bus_burst" + std::to_string(burst) + "_mem" +
-           std::to_string(memcnt) + ".csv";
-  };
-  auto stats_out = [](size_t burst, int memcnt) {
-    return "output/bus_burst" + std::to_string(burst) + "_mem" +
-           std::to_string(memcnt) + ".txt";
-  };
-  size_t burst = 4;
-  auto config = EpochConfig{0,
-                            0,
+  auto config = EpochConfig{4100,
+                            128,
                             0,
                             1,
-                            burst,
-                            false,
+                            1,
+                            true,
                             true,
                             15,
                             1,
-                            32,
-                            8 * 32,
+                            256,
+                            8 * 256,
                             40,
-                            0,
+                            6,
                             (64 * 500),
                             1,
                             40,
@@ -84,51 +68,28 @@ int main() {
                             xerxes::LogLevel::INFO,
                             0,
                             0,
-                            "",
-                            ""};
+                            "output/chain_switch.csv",
+                            "output/chain_switch.txt"};
 
-  auto do_epoch = [&](size_t memcnt) {
-    config.memcnt = memcnt;
-    config.hostq = hostq(memcnt);
-    config.cnt = 1000 * config.memcnt + config.hostq;
-    config.output = output(burst, memcnt);
-    config.stats_out = stats_out(burst, memcnt);
-    std::cout << "Doing epoch [memcnt=" << memcnt << "]..." << std::flush;
-    epoch(config);
-    std::cout << "Done." << std::endl;
-  };
-
-  do_epoch(1);
-  do_epoch(2);
-  do_epoch(4);
-  do_epoch(8);
-  do_epoch(16);
-  do_epoch(32);
+  epoch(config);
   return 0;
 }
 
 void epoch(EpochConfig &config) {
+  config.memcnt = 4;
   // Make simulation skeleton.
   auto sim = xerxes::Simulation{};
 
   // Make devices.
   auto host = xerxes::Host{sim.topology(), config.hostq, config.snoop,
                            config.cnt,     config.hostd, config.burst};
-  auto snoop_evict = new xerxes::Snoop::FIFO{};
-  auto snoop = xerxes::Snoop{sim.topology(), config.linen, config.assoc,
-                             snoop_evict,    false,        "snoop0"};
   auto bus = xerxes::DuplexBus{sim.topology(), config.is_full, config.halft,
                                config.tpert,   config.bwidth,  config.framing};
-
-  auto pkg0 = xerxes::Packaging{sim.topology(), config.package_num, "package0"};
-  auto pkg1 = xerxes::Packaging{sim.topology(), config.package_num, "package1"};
-
-  auto sw = xerxes::Switch{sim.topology(), config.switch_, "switch"};
+  auto sw0 = xerxes::Switch{sim.topology(), config.switch_, "switch0"};
+  auto sw1 = xerxes::Switch{sim.topology(), config.switch_, "switch1"};
+  auto sw2 = xerxes::Switch{sim.topology(), config.switch_, "switch2"};
   std::vector<xerxes::DRAMsim3Interface *> mems;
-  std::vector<xerxes::BurstHandler *> bursts;
   for (int i = 0; i < config.memcnt; ++i) {
-    bursts.push_back(
-        new xerxes::BurstHandler{sim.topology(), "burst" + std::to_string(i)});
     mems.push_back(new xerxes::DRAMsim3Interface{
         sim.topology(), config.clock, config.proce,
         config.capa * (xerxes::Addr)(i), config.config, "output",
@@ -138,27 +99,43 @@ void epoch(EpochConfig &config) {
   // Make topology by `add_dev()` and `add_edge()`.
   // Use `build_route()` to acctually build route table.
   // Use `set_entry()` to set the entry point of the simulation.
-  sim.system()->add_dev(&host)->add_dev(&bus)->add_dev(&sw)->add_dev(&snoop);
+  sim.system()
+      ->add_dev(&host)
+      ->add_dev(&bus)
+      ->add_dev(&sw0)
+      ->add_dev(&sw1)
+      ->add_dev(&sw2);
   for (auto i = 0; i < config.memcnt; ++i) {
-    sim.system()->add_dev(bursts[i]);
     sim.system()->add_dev(mems[i]);
   }
-  sim.system()->add_dev(&pkg0)->add_dev(&pkg1);
 
   sim.topology()
-      ->add_edge(host.id(), pkg0.id())
-      ->add_edge(pkg0.id(), bus.id())
-      ->add_edge(bus.id(), pkg1.id())
-      ->add_edge(pkg1.id(), sw.id());
-  for (auto i = 0; i < config.memcnt; ++i) {
-    sim.topology()->add_edge(sw.id(), bursts[i]->id());
-    sim.topology()->add_edge(bursts[i]->id(), mems[i]->id());
-  }
+      ->add_edge(host.id(), bus.id())
+      ->add_edge(bus.id(), sw0.id())
+
+      // Chain the switches.
+      ->add_edge(sw0.id(), sw1.id())
+      ->add_edge(sw0.id(), mems[0]->id())
+      ->add_edge(sw1.id(), sw2.id())
+      ->add_edge(sw1.id(), mems[1]->id())
+      ->add_edge(sw2.id(), mems[2]->id())
+      ->add_edge(sw2.id(), mems[3]->id());
+
+  sw0.add_upstream(bus.id());
+  sw1.add_upstream(sw0.id());
+  sw2.add_upstream(sw1.id());
+
+  /*
+        // Tree the switches.
+        ->add_edge(sw0.id(), sw1.id())
+        ->add_edge(sw0.id(), sw2.id())
+        ->add_edge(sw1.id(), mems[0]->id())
+        ->add_edge(sw1.id(), mems[1]->id())
+        ->add_edge(sw2.id(), mems[2]->id())
+        ->add_edge(sw2.id(), mems[3]->id());
+  */
   sim.topology()->build_route();
   sim.set_entry(host.id());
-
-  // Use `log_route()` to log the route table.
-  sim.topology()->log_route(xerxes::Logger::debug());
 
   // Build a notifier, triggered when a device is receiving a packet.
   auto notifier_func = [&](void *topo_id) {
@@ -220,34 +197,26 @@ void epoch(EpochConfig &config) {
                        config.random);
   }
 
-  // Add topology to the switch.
-  sw.add_upstream(host.id());
-  for (auto mem : mems) {
-    sw.add_downstream(mem->id());
-  }
-
-  // Add topology to packaging.
-  pkg0.add_upstream(host.id());
-  pkg1.add_upstream(sw.id());
-
   auto &notifier = *xerxes::Notifier::glb();
   auto issue_cnt = 0;
   auto ratio = config.ratio;
 
   while (!host.all_issued()) {
-    bool res = false;
-    if (ratio == 0) {
-      res = host.step(xerxes::PacketType::RD);
-    } else if (ratio == -1) {
-      res = host.step(xerxes::PacketType::WT);
-    } else {
-      res = host.step((issue_cnt / 4) % (ratio + 1) == ratio
-                          ? xerxes::PacketType::WT
-                          : xerxes::PacketType::RD);
+    bool res = true;
+    while (res) {
+      if (ratio == 0) {
+        res = host.step(xerxes::PacketType::RD);
+      } else if (ratio == -1) {
+        res = host.step(xerxes::PacketType::WT);
+      } else {
+        res = host.step((issue_cnt / 4) % (ratio + 1) == ratio
+                            ? xerxes::PacketType::WT
+                            : xerxes::PacketType::RD);
+      }
+      issue_cnt += (int)(res);
     }
-    issue_cnt += (int)(res);
-    notifier.step();
-    if (!res) {
+    auto rem = notifier.step();
+    if (!res || rem == 0) {
       for (int i = 0; i < config.grain; ++i) {
         for (auto mem : mems) {
           mem->clock();
@@ -267,6 +236,11 @@ void epoch(EpochConfig &config) {
 
   // Log the statistics of the devices.
   std::fstream stats_out = std::fstream(config.stats_out, std::ios::out);
+  // Use `log_route()` to log the route table.
+  // sim.topology()->log_route(stats_out);
   host.log_stats(stats_out);
-  bus.log_stats(stats_out);
+  // bus.log_stats(stats_out);
+  sw0.log_stats(stats_out);
+  sw1.log_stats(stats_out);
+  sw2.log_stats(stats_out);
 }

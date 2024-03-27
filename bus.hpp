@@ -50,9 +50,7 @@ public:
   }
 
   void transit() override {
-    show_all_pkt();
     auto pkt = receive_pkt();
-    Logger::debug() << name_ << " transit packet " << pkt.id << std::endl;
     auto to = topology->next_node(self, pkt.dst);
 
     if (pkt.is_sub_pkt) {

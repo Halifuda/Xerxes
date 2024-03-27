@@ -13,7 +13,7 @@ class TopoNode {
   friend class Topology;
 
   TopoID self;
-  std::set<TopoID> neighbors;
+  std::set<TopoID> neighbors_;
   std::list<Packet> buffer;
 
 public:
@@ -40,8 +40,10 @@ public:
     Logger::debug() << std::endl;
   }
 
+  const auto &neighbors() { return neighbors_; }
+
   TopoID id() { return self; }
-  std::set<TopoID> &neighbor_set() { return neighbors; }
+  std::set<TopoID> &neighbor_set() { return neighbors_; }
 };
 
 class Topology {
@@ -60,8 +62,8 @@ public:
     if (first < 0 || second < 0 || (size_t)first >= nodes.size() ||
         (size_t)second >= nodes.size())
       return this;
-    nodes[first].neighbors.insert(second);
-    nodes[second].neighbors.insert(first);
+    nodes[first].neighbors_.insert(second);
+    nodes[second].neighbors_.insert(first);
     return this;
   }
 
@@ -71,10 +73,10 @@ public:
       r.resize(nodes.size(), -1);
 
     for (size_t i = 0; i < nodes.size(); i++) {
-      for (auto &n : nodes[i].neighbors)
+      for (auto &n : nodes[i].neighbors_)
         router[i][n] = n;
 
-      for (auto &n : nodes[i].neighbors) {
+      for (auto &n : nodes[i].neighbors_) {
         // make the router, i -> n -> x, router[i][x] = n
         std::queue<TopoID> q;
         std::set<TopoID> visited;
@@ -83,7 +85,7 @@ public:
         while (!q.empty()) {
           auto cur = q.front();
           q.pop();
-          for (auto &nn : nodes[cur].neighbors) {
+          for (auto &nn : nodes[cur].neighbors_) {
             if (visited.find(nn) == visited.end()) {
               visited.insert(nn);
               if (router[i][nn] == -1) {
@@ -100,12 +102,12 @@ public:
       router[i][i] = -1;
   }
 
-  void log_route(Logger &logger) {
+  void log_route(std::ostream &os) {
     for (size_t i = 0; i < nodes.size(); i++) {
       for (size_t j = 0; j < nodes.size(); j++) {
         if (router[i][j] == -1)
           continue;
-        logger << i << " -> " << j << " : " << router[i][j] << std::endl;
+        os << i << " -> " << j << " : " << router[i][j] << std::endl;
       }
     }
   }

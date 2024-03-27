@@ -85,23 +85,25 @@ private:
   size_t burst_size = 1;
   size_t block_size = 64;
 
-  std::unordered_map<std::string, double> stats;
+  std::unordered_map<TopoID, std::unordered_map<std::string, double>> stats;
 
 public:
   Host(Topology *topology, size_t q_capacity, Tick snoop_time, size_t count,
        Tick delay, size_t burst_size = 1, std::string name = "Host")
       : Device(topology, name), q(q_capacity), snoop_time(snoop_time),
         count(count), delay(delay), burst_size(burst_size),
-        block_size(burst_size * 64) {
-    stats["Bandwidth"] = 0;
-    stats["Average latency"] = 0;
-    stats["Average wait on bus"] = 0;
-    stats["Average wait for packaging"] = 0;
-    stats["Average wait burst"] = 0;
-  }
+        block_size(burst_size * 64) {}
 
   Host &add_end_point(TopoID id, Addr start, size_t capacity, bool is_random) {
     end_points.push_back({id, start, capacity, is_random});
+    stats[id] = {};
+    stats[id]["Count"] = 0;
+    stats[id]["Bandwidth"] = 0;
+    stats[id]["Average latency"] = 0;
+    stats[id]["Average wait on switch"] = 0;
+    // stats[id]["Average wait on bus"] = 0;
+    // stats[id]["Average wait for packaging"] = 0;
+    // stats[id]["Average wait burst"] = 0;
     return *this;
   }
 
@@ -115,14 +117,11 @@ public:
         last_arrive = pkt.arrive;
 
         // Update stats
-        stats["Bandwidth"] += pkt.burst * 64;
-        stats["Average latency"] += pkt.arrive - pkt.sent;
-        stats["Average wait on bus"] +=
-            pkt.get_stat(NormalStatType::BUS_QUEUE_DELAY);
-        stats["Average wait for packaging"] +=
-            pkt.get_stat(NormalStatType::PACKAGING_DELAY);
-        stats["Average wait burst"] +=
-            pkt.get_stat(NormalStatType::WAIT_ALL_BURST);
+        stats[pkt.src]["Count"] += 1;
+        stats[pkt.src]["Bandwidth"] += pkt.burst * 64;
+        stats[pkt.src]["Average latency"] += pkt.arrive - pkt.sent;
+        stats[pkt.src]["Average wait on switch"] +=
+            pkt.get_stat(SWITCH_QUEUE_DELAY);
 
         q.pop(pkt);
         pkt.log_stat();
@@ -143,17 +142,28 @@ public:
   void log_stats(std::ostream &os) override {
     os << "Host stats: " << std::endl;
     os << "Issued packets: " << cur_cnt << std::endl;
-    // TODO: cnt -> bytes
-    os << "Bandwidth (GB/s): " << stats["Bandwidth"] / (double)(last_arrive)
+    double agg_bw = 0;
+    double agg_lat = 0;
+    double agg_wait = 0;
+    for (auto &pair : stats) {
+      os << "  Endpoint " << pair.first << ": " << std::endl;
+      os << "    Bandwidth (GB/s): "
+         << pair.second["Bandwidth"] / (double)(last_arrive) << std::endl;
+      agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
+
+      os << "    Average latency (ns): "
+         << pair.second["Average latency"] / pair.second["Count"] << std::endl;
+      agg_lat += pair.second["Average latency"];
+      os << "    Average wait on switch (ns): "
+         << pair.second["Average wait on switch"] / pair.second["Count"]
+         << std::endl;
+      agg_wait += pair.second["Average wait on switch"];
+    }
+    os << "  Aggregate: " << std::endl;
+    os << "    Bandwidth (GB/s): " << agg_bw << std::endl;
+    os << "    Average latency (ns): " << agg_lat / cur_cnt << std::endl;
+    os << "    Average wait on switch (ns): " << agg_wait / cur_cnt
        << std::endl;
-    os << "Average latency (ns): " << stats["Average latency"] / (double)cur_cnt
-       << std::endl;
-    os << "Average wait on bus (ns): "
-       << stats["Average wait on bus"] / (double)cur_cnt << std::endl;
-    os << "Average wait for packaging (ns): "
-       << stats["Average wait for packaging"] / (double)cur_cnt << std::endl;
-    os << "Average wait burst time (ns): "
-       << stats["Average wait burst"] / (double)cur_cnt << std::endl;
   }
 
   bool step(PacketType type) {

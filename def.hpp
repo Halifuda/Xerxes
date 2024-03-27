@@ -144,6 +144,7 @@ struct Packet {
         src(pkt.src), dst(pkt.dst), is_rsp(pkt.is_rsp),
         is_sub_pkt(pkt.is_sub_pkt) {}
 
+  bool valid() { return id != -1 && type != PKT_TYPE_NUM && type != CORUPT; }
   /**
    * @brief Check if the packet is a write request.
    * @return true if the packet is a write request.
