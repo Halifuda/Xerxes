@@ -89,7 +89,7 @@ public:
   }
 
   void log_stats(std::ostream &os) override {
-    os << "Bus stats: " << std::endl;
+    os << name() << " stats: " << std::endl;
     for (auto &stat : stats) {
       os << std::fixed << stat.first << ": " << stat.second << std::endl;
     }

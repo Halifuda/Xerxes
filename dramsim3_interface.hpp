@@ -67,7 +67,7 @@ public:
     auto pkt = receive_pkt();
     while (pkt.type != PacketType::PKT_TYPE_NUM) {
       if (pkt.dst == self) {
-        Logger::debug() << name_ << " receive packet " << pkt.id << " from "
+        Logger::debug() << name() << " receive packet " << pkt.id << " from "
                         << pkt.from << " at " << pkt.arrive << std::endl;
         pkt.delta_stat(DEVICE_PROCESS_TIME, (double)(process_time));
         pkt.arrive += process_time;

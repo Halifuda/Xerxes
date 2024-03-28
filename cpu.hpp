@@ -100,7 +100,9 @@ public:
     stats[id]["Count"] = 0;
     stats[id]["Bandwidth"] = 0;
     stats[id]["Average latency"] = 0;
-    stats[id]["Average wait on switch"] = 0;
+    stats[id]["Average wait for evict"] = 0;
+    stats[-1]["Invalidation count"] = 0;
+    // stats[id]["Average wait on switch"] = 0;
     // stats[id]["Average wait on bus"] = 0;
     // stats[id]["Average wait for packaging"] = 0;
     // stats[id]["Average wait burst"] = 0;
@@ -112,7 +114,7 @@ public:
     if (pkt.dst == self) {
       // On receive
       if (pkt.is_rsp) {
-        Logger::debug() << name_ << " receive packet " << pkt.id
+        Logger::debug() << name() << " receive packet " << pkt.id
                         << ", issue queue is full? " << q.full() << std::endl;
         last_arrive = pkt.arrive;
 
@@ -120,12 +122,13 @@ public:
         stats[pkt.src]["Count"] += 1;
         stats[pkt.src]["Bandwidth"] += pkt.burst * 64;
         stats[pkt.src]["Average latency"] += pkt.arrive - pkt.sent;
-        stats[pkt.src]["Average wait on switch"] +=
-            pkt.get_stat(SWITCH_QUEUE_DELAY);
+        stats[pkt.src]["Average wait for evict"] +=
+            pkt.get_stat(NormalStatType::SNOOP_EVICT_DELAY);
 
         q.pop(pkt);
         pkt.log_stat();
       } else if (pkt.type == INV) {
+        stats[-1]["Invalidation count"] += 1;
         std::swap(pkt.src, pkt.dst);
         pkt.is_rsp = true;
         pkt.payload = block_size;
@@ -140,29 +143,36 @@ public:
   }
 
   void log_stats(std::ostream &os) override {
-    os << "Host stats: " << std::endl;
-    os << "Issued packets: " << cur_cnt << std::endl;
+    os << name() << " stats: " << std::endl;
+    os << " * Issued packets: " << cur_cnt << std::endl;
+    os << " * Invalidation count: " << stats[-1]["Invalidation count"]
+       << std::endl;
     double agg_bw = 0;
+    double agg_cnt = 0;
     double agg_lat = 0;
     double agg_wait = 0;
     for (auto &pair : stats) {
-      os << "  Endpoint " << pair.first << ": " << std::endl;
-      os << "    Bandwidth (GB/s): "
+      if (pair.first == -1)
+        continue;
+      agg_cnt += pair.second["Count"];
+      os << " * Endpoint " << pair.first << ": " << std::endl;
+      os << "   - Bandwidth (GB/s): "
          << pair.second["Bandwidth"] / (double)(last_arrive) << std::endl;
       agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
 
-      os << "    Average latency (ns): "
+      os << "   - Average latency (ns): "
          << pair.second["Average latency"] / pair.second["Count"] << std::endl;
       agg_lat += pair.second["Average latency"];
-      os << "    Average wait on switch (ns): "
-         << pair.second["Average wait on switch"] / pair.second["Count"]
+
+      os << "   - Average wait for evict (ns): "
+         << pair.second["Average wait for evict"] / pair.second["Count"]
          << std::endl;
-      agg_wait += pair.second["Average wait on switch"];
+      agg_wait += pair.second["Average wait for evict"];
     }
-    os << "  Aggregate: " << std::endl;
-    os << "    Bandwidth (GB/s): " << agg_bw << std::endl;
-    os << "    Average latency (ns): " << agg_lat / cur_cnt << std::endl;
-    os << "    Average wait on switch (ns): " << agg_wait / cur_cnt
+    os << " * Aggregate: " << std::endl;
+    os << "   - Bandwidth (GB/s): " << agg_bw << std::endl;
+    os << "   - Average latency (ns): " << agg_lat / agg_cnt << std::endl;
+    os << "   - Average wait for evict (ns): " << agg_wait / agg_cnt
        << std::endl;
   }
 

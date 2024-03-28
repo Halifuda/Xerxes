@@ -28,14 +28,14 @@ protected:
   }
 
   void show_all_pkt() {
-    Logger::debug() << name_ << " has packets: ";
+    Logger::debug() << name() << " has packets: ";
     topology->get_node(self)->show_all_pkt();
   }
 
   void log_transit_normal(const Packet &pkt) {
-    Logger::debug() << name_ << "#" << self << " transit packet " << pkt.id
-                    << " from " << pkt.from << " to " << pkt.dst << " at "
-                    << pkt.arrive << std::endl;
+    Logger::debug() << name() << " transit packet " << pkt.id << " from "
+                    << pkt.from << " to " << pkt.dst << " at " << pkt.arrive
+                    << std::endl;
   }
 
 public:
@@ -43,7 +43,7 @@ public:
       : topology(topology), self(topology->new_node()), name_(name) {}
   virtual ~Device() {}
 
-  const std::string &name() const { return name_; }
+  std::string name() const { return name_ + "#" + std::to_string(self); }
   const TopoID id() const { return self; }
 
   virtual void transit() {

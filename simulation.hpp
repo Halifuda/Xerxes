@@ -15,7 +15,6 @@ namespace xerxes {
 class Simulation {
   Topology *p_topology;
   System *p_system;
-  TopoID entry;
 
 public:
   Simulation() : p_topology(new Topology), p_system(new System) {}
@@ -27,6 +26,5 @@ public:
 
   Topology *topology() { return p_topology; }
   System *system() { return p_system; }
-  void set_entry(TopoID id) { entry = id; }
 };
 } // namespace xerxes

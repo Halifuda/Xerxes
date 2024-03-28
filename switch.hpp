@@ -40,7 +40,7 @@ private:
 
   Port &to_port(const Packet &pkt) {
     auto to = topology->next_node(self, pkt.dst);
-    ASSERT(to != nullptr, name_ + ": No next node for packet " +
+    ASSERT(to != nullptr, name() + ": No next node for packet " +
                               std::to_string(pkt.id) + " from " +
                               std::to_string(pkt.src) + " to " +
                               std::to_string(pkt.dst));
@@ -105,7 +105,7 @@ public:
   }
 
   void log_stats(std::ostream &os) override {
-    os << name_ << " stats:\n";
+    os << name() << " stats:\n";
     for (auto &port : ports) {
       os << "Port " << port.first << ":\n";
       os << "  Average queue depth: "

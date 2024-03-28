@@ -40,10 +40,9 @@ public:
     Logger::debug() << std::endl;
   }
 
-  const auto &neighbors() { return neighbors_; }
+  const std::set<TopoID> &neighbors() { return neighbors_; }
 
   TopoID id() { return self; }
-  std::set<TopoID> &neighbor_set() { return neighbors_; }
 };
 
 class Topology {

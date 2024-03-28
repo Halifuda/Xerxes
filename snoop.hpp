@@ -91,11 +91,11 @@ private:
   std::vector<std::vector<Line>> cache;
   std::vector<std::map<PktID, Packet>> waiting;
 
-  ssize_t hit(Addr addr) {
+  ssize_t hit(Addr addr, TopoID owner) {
     auto &set = cache[addr % set_num];
     for (ssize_t i = 0; i < (ssize_t)assoc; ++i) {
       auto &line = set[i];
-      if (line.valid && line.addr == addr) {
+      if (line.valid && line.addr == addr && line.owner == owner) {
         if (eviction)
           eviction->on_hit(addr, addr % set_num, i);
         return i;
@@ -134,10 +134,10 @@ private:
   }
 
   void evict(size_t set_i, Tick tick) {
-    ASSERT(eviction != nullptr, name_ + ": eviction policy is null");
+    ASSERT(eviction != nullptr, name() + ": eviction policy is null");
     auto &set = cache[set_i];
     auto victim = eviction->find_victim(set_i, true);
-    Logger::debug() << name_ << ": evict victim [" << set_i << ": " << victim
+    Logger::debug() << name() << ": evict victim [" << set_i << ": " << victim
                     << "]" << std::endl;
     if (victim != -1) {
       auto &line = set[victim];
@@ -151,7 +151,7 @@ private:
                      .dst(line.owner)
                      .is_rsp(false)
                      .build();
-      Logger::debug() << name_ << ": evict packet " << inv.id << " [" << set_i
+      Logger::debug() << name() << ": evict packet " << inv.id << " [" << set_i
                       << ": " << victim << "] addr " << line.addr << " owner "
                       << line.owner << std::endl;
       send_pkt(inv);
@@ -165,19 +165,19 @@ private:
     if (pkt.is_coherent() && !pkt.is_rsp) {
       // Coherence packet. Need to record in snoop cache.
       auto set_i = pkt.addr % set_num;
-      auto way_i = hit(pkt.addr);
+      auto way_i = hit(pkt.addr, pkt.src);
       if (way_i == -1) {
         // Not hit. Need to allocate a new way.
         auto new_way_i = new_way(pkt.addr);
         if (new_way_i == -1) {
           // No empty way. Need to evict. Packet need to wait until evict done.
-          Logger::debug() << name_ << ": pkt " << pkt.id << " wait evict ["
+          Logger::debug() << name() << ": pkt " << pkt.id << " wait evict ["
                           << set_i << "]" << std::endl;
           waiting[set_i].insert(std::make_pair(pkt.id, pkt));
           evict(set_i, pkt.arrive);
         } else {
           // Empty way. Allocate.
-          Logger::debug() << name_ << ": pkt " << pkt.id << " allocate ["
+          Logger::debug() << name() << ": pkt " << pkt.id << " allocate ["
                           << set_i << ":" << new_way_i << "]" << std::endl;
           update(pkt.addr, set_i, new_way_i, pkt.src, WAIT_DRAM, true, false);
 
@@ -185,7 +185,7 @@ private:
           send_pkt(pkt);
         }
       } else {
-        Logger::debug() << name_ << ": pkt " << pkt.id << " hit at [" << set_i
+        Logger::debug() << name() << ": pkt " << pkt.id << " hit at [" << set_i
                         << ":" << way_i << "]" << std::endl;
         // Hit. Directly send back (host should hold the data already).
         std::swap(pkt.src, pkt.dst);
@@ -199,7 +199,7 @@ private:
       // Update snoop cache.
       auto tick = pkt.arrive;
       auto set_i = pkt.addr % set_num;
-      auto way_i = hit(pkt.addr);
+      auto way_i = hit(pkt.addr, pkt.src);
       // Send the write back packet.
       // TODO: issue delay
       pkt.type = PacketType::NT_WT;
@@ -214,12 +214,14 @@ private:
       if (waiting_it != waiting[set_i].end()) {
         // Some packet is waiting for this eviction.
         auto &waiter = waiting_it->second;
-        Logger::debug() << name_ << ": insert waiter pkt " << waiter.id
+        Logger::debug() << name() << ": insert waiter pkt " << waiter.id
                         << " to [" << set_i << ":" << way_i << "]" << std::endl;
         update(waiter.addr, set_i, way_i, waiter.src, WAIT_DRAM, true, false);
         // Send the waiting.
-        waiter.delta_stat(SNOOP_EVICT_DELAY, (double)(tick - waiter.arrive));
-        waiter.arrive = tick;
+        if (tick > waiter.arrive) {
+          waiter.delta_stat(SNOOP_EVICT_DELAY, (double)(tick - waiter.arrive));
+          waiter.arrive = tick;
+        }
         send_pkt(waiting_it->second);
         waiting[set_i].erase(waiting_it);
       }
@@ -228,9 +230,9 @@ private:
       if (pkt.is_rsp) {
         auto tick = pkt.arrive;
         auto set_i = pkt.addr % set_num;
-        auto way_i = hit(pkt.addr);
+        auto way_i = hit(pkt.addr, pkt.dst);
         if (way_i != -1) {
-          Logger::debug() << name_ << ": DRAM rsp pkt " << pkt.id << " hit ["
+          Logger::debug() << name() << ": DRAM rsp pkt " << pkt.id << " hit ["
                           << set_i << ":" << way_i << "]" << std::endl;
           update(pkt.addr, set_i, way_i, pkt.dst, EXCLUSIVE, true, true);
           if (waiting[set_i].size() > 0) {
@@ -240,7 +242,7 @@ private:
           }
         }
       }
-      Logger::debug() << name_ << " send packet " << pkt.id << std::endl;
+      Logger::debug() << name() << " send packet " << pkt.id << std::endl;
       log_transit_normal(pkt);
       send_pkt(pkt);
     }
@@ -270,7 +272,7 @@ public:
     // filter all packets
     auto pkt = receive_pkt();
     if (!pkt.is_rsp)
-      Logger::debug() << name_ << " receive packet " << pkt.id << std::endl;
+      Logger::debug() << name() << " receive packet " << pkt.id << std::endl;
     filter(pkt);
   }
 };
