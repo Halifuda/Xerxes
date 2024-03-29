@@ -91,13 +91,18 @@ private:
   std::vector<std::vector<Line>> cache;
   std::vector<std::map<PktID, Packet>> waiting;
 
+  std::unordered_map<TopoID, double> host_trig_conflict_count;
+
+  size_t set_of(Addr addr) { return (addr / 64) % set_num; }
+
   ssize_t hit(Addr addr, TopoID owner) {
-    auto &set = cache[addr % set_num];
+    auto set_i = set_of(addr);
+    auto &set = cache[set_i];
     for (ssize_t i = 0; i < (ssize_t)assoc; ++i) {
       auto &line = set[i];
       if (line.valid && line.addr == addr && line.owner == owner) {
         if (eviction)
-          eviction->on_hit(addr, addr % set_num, i);
+          eviction->on_hit(addr, set_i, i);
         return i;
       }
     }
@@ -105,7 +110,7 @@ private:
   }
 
   ssize_t new_way(Addr addr) {
-    auto &set = cache[addr % set_num];
+    auto &set = cache[set_of(addr)];
     for (ssize_t i = 0; i < (ssize_t)assoc; ++i) {
       auto &line = set[i];
       if (!line.valid)
@@ -164,13 +169,18 @@ private:
   void filter(Packet pkt) {
     if (pkt.is_coherent() && !pkt.is_rsp) {
       // Coherence packet. Need to record in snoop cache.
-      auto set_i = pkt.addr % set_num;
+      auto set_i = set_of(pkt.addr);
       auto way_i = hit(pkt.addr, pkt.src);
       if (way_i == -1) {
         // Not hit. Need to allocate a new way.
         auto new_way_i = new_way(pkt.addr);
         if (new_way_i == -1) {
           // No empty way. Need to evict. Packet need to wait until evict done.
+          if (host_trig_conflict_count.find(pkt.src) ==
+              host_trig_conflict_count.end()) {
+            host_trig_conflict_count[pkt.src] = 0;
+          }
+          host_trig_conflict_count[pkt.src] += 1;
           Logger::debug() << name() << ": pkt " << pkt.id << " wait evict ["
                           << set_i << "]" << std::endl;
           waiting[set_i].insert(std::make_pair(pkt.id, pkt));
@@ -198,7 +208,7 @@ private:
         pkt.log_stat();
       // Update snoop cache.
       auto tick = pkt.arrive;
-      auto set_i = pkt.addr % set_num;
+      auto set_i = set_of(pkt.addr);
       auto way_i = hit(pkt.addr, pkt.src);
       // Send the write back packet.
       // TODO: issue delay
@@ -229,7 +239,7 @@ private:
       // Non-temporal or response. Directly send the packet.
       if (pkt.is_rsp) {
         auto tick = pkt.arrive;
-        auto set_i = pkt.addr % set_num;
+        auto set_i = set_of(pkt.addr);
         auto way_i = hit(pkt.addr, pkt.dst);
         if (way_i != -1) {
           Logger::debug() << name() << ": DRAM rsp pkt " << pkt.id << " hit ["
@@ -274,6 +284,15 @@ public:
     if (!pkt.is_rsp)
       Logger::debug() << name() << " receive packet " << pkt.id << std::endl;
     filter(pkt);
+  }
+
+  void log_stats(std::ostream &os) override {
+    os << name() << " stats:" << std::endl;
+    for (auto &pair : host_trig_conflict_count) {
+      auto &host = pair.first;
+      auto &count = pair.second;
+      os << " - host " << host << " conflict count: " << count << std::endl;
+    }
   }
 };
 

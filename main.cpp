@@ -71,7 +71,7 @@ int main() {
                             "",
                             ""};
 
-  std::vector<size_t> epoch_assoc = {1, 4, 8, 16, 32, 64, 128};
+  std::vector<size_t> epoch_assoc = {2};
   for (size_t i = 0; i < epoch_assoc.size(); ++i) {
     config.assoc = epoch_assoc[i];
     config.output =
@@ -96,7 +96,7 @@ void epoch(EpochConfig &config) {
   auto host1 = xerxes::Host{sim.topology(), config.hostq, config.snoop,
                             config.cnt,     config.hostd, config.burst};
   auto snoop = xerxes::Snoop{sim.topology(), config.linen, config.assoc,
-                             new xerxes::Snoop::FIFO{}};
+                             new xerxes::Snoop::FIFO{}, true};
   auto mem =
       xerxes::DRAMsim3Interface{sim.topology(), config.clock, config.proce, 0,
                                 config.config,  "output",     "mem"};
@@ -234,5 +234,6 @@ void epoch(EpochConfig &config) {
   // sim.topology()->log_route(stats_out);
   host0.log_stats(stats_out);
   host1.log_stats(stats_out);
+  snoop.log_stats(stats_out);
   // bus.log_stats(stats_out);
 }
