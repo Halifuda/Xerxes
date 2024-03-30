@@ -32,19 +32,21 @@ struct EpochConfig {
   size_t snoop;
   size_t linen;
   size_t assoc;
+  std::string evict_policy;
   // Epoch def.
   xerxes::LogLevel loglevel;
   int ratio;
   int memcnt;
   std::string output;
   std::string stats_out;
+  std::pair<double, double> avg_bw__and__avg_conflict_cnt;
 };
 
 void epoch(EpochConfig &);
 
 int main() {
   auto config = EpochConfig{2000,
-                            8,
+                            20,
                             0,
                             1,
                             1,
@@ -64,23 +66,43 @@ int main() {
                             "output/dram.ini",
                             20,
                             128,
-                            16,
+                            128,
+                            "",
                             xerxes::LogLevel::INFO,
                             0,
-                            0,
-                            "",
-                            ""};
+                            2,
+                            "/dev/null",
+                            "/dev/null"};
 
-  std::vector<size_t> epoch_assoc = {2};
-  for (size_t i = 0; i < epoch_assoc.size(); ++i) {
-    config.assoc = epoch_assoc[i];
-    config.output =
-        "output/coh_assoc" + std::to_string(epoch_assoc[i]) + ".csv";
-    config.stats_out =
-        "output/coh_assoc" + std::to_string(epoch_assoc[i]) + ".txt";
-    std::cout << "Epoch " << i << "..." << std::flush;
-    epoch(config);
-    std::cout << "done." << std::endl;
+  std::vector<int> memcnts = {2, 4, 8, 16};
+  std::vector<std::string> evictions = {"FIFO", "LIFO", "LRU", "MRU"};
+  std::vector<std::pair<double, double>> avg_bw__and__avg_conflict_cnt;
+  for (int m : memcnts) {
+    avg_bw__and__avg_conflict_cnt.clear();
+    config.memcnt = m;
+    for (size_t i = 0; i < evictions.size(); ++i) {
+      config.evict_policy = evictions[i];
+      // config.output = "output/coh_mem" + std::to_string(m) + "_evict_" +
+      //                 evictions[i] + ".csv";
+      // config.stats_out = "output/coh_mem" + std::to_string(m) + "_evict_" +
+      //                    evictions[i] + ".txt";
+      std::cout << "Epoch [m" << m << ", e=" << evictions[i] << "]..."
+                << std::flush;
+      epoch(config);
+      std::cout << "done." << std::endl;
+      avg_bw__and__avg_conflict_cnt.push_back(
+          config.avg_bw__and__avg_conflict_cnt);
+    }
+    std::fstream stats_out = std::fstream(
+        "output/evictions_mem" + std::to_string(m) + ".csv", std::ios::out);
+    stats_out << "Eviction policy,Average bandwidth (GB/s),Average conflict "
+                 "count"
+              << std::endl;
+    for (size_t i = 0; i < evictions.size(); ++i) {
+      stats_out << evictions[i] << "," << avg_bw__and__avg_conflict_cnt[i].first
+                << "," << avg_bw__and__avg_conflict_cnt[i].second << std::endl;
+    }
+    stats_out.close();
   }
 
   return 0;
@@ -90,27 +112,51 @@ void epoch(EpochConfig &config) {
   // Make simulation skeleton.
   auto sim = xerxes::Simulation{};
 
+  auto get_evict = [](std::string name) {
+    if (name == "FIFO") {
+      return (xerxes::Snoop::SnoopEviction *)new xerxes::Snoop::FIFO{};
+    } else if (name == "LIFO") {
+      return (xerxes::Snoop::SnoopEviction *)new xerxes::Snoop::LIFO{};
+    } else if (name == "LRU") {
+      return (xerxes::Snoop::SnoopEviction *)new xerxes::Snoop::LRU{};
+    } else if (name == "MRU") {
+      return (xerxes::Snoop::SnoopEviction *)new xerxes::Snoop::MRU{};
+    } else if (name == "Random") {
+      return (xerxes::Snoop::SnoopEviction *)new xerxes::Snoop::Random{};
+    } else {
+      return (xerxes::Snoop::SnoopEviction *)new xerxes::Snoop::FIFO{};
+    }
+  };
+
   // Make devices.
-  auto host0 = xerxes::Host{sim.topology(), config.hostq, config.snoop,
-                            config.cnt,     config.hostd, config.burst};
-  auto host1 = xerxes::Host{sim.topology(), config.hostq, config.snoop,
-                            config.cnt,     config.hostd, config.burst};
-  auto snoop = xerxes::Snoop{sim.topology(), config.linen, config.assoc,
-                             new xerxes::Snoop::FIFO{}, true};
-  auto mem =
-      xerxes::DRAMsim3Interface{sim.topology(), config.clock, config.proce, 0,
-                                config.config,  "output",     "mem"};
+  std::vector<xerxes::Host *> hosts = {};
+  std::vector<xerxes::Snoop *> snoops = {};
+  std::vector<xerxes::DRAMsim3Interface *> mems = {};
+  for (int i = 0; i < config.memcnt; ++i) {
+    hosts.push_back(new xerxes::Host{sim.topology(), config.hostq, config.snoop,
+                                     config.cnt, config.hostd, config.burst});
+    snoops.push_back(new xerxes::Snoop{sim.topology(), config.linen,
+                                       config.assoc,
+                                       get_evict(config.evict_policy), true});
+    mems.push_back(new xerxes::DRAMsim3Interface{sim.topology(), config.clock,
+                                                 config.proce, 0, config.config,
+                                                 "output", "mem"});
+  }
 
   // Make topology by `add_dev()` and `add_edge()`.
   // Use `build_route()` to acctually build route table.
   // Use `set_entry()` to set the entry point of the simulation.
-  sim.system()->add_dev(&host0)->add_dev(&host1)->add_dev(&snoop)->add_dev(
-      &mem);
-
-  sim.topology()
-      ->add_edge(host0.id(), snoop.id())
-      ->add_edge(host1.id(), snoop.id())
-      ->add_edge(snoop.id(), mem.id());
+  for (int i = 0; i < config.memcnt; ++i) {
+    sim.system()->add_dev(hosts[i]);
+    sim.system()->add_dev(snoops[i]);
+    sim.system()->add_dev(mems[i]);
+  }
+  for (int i = 0; i < config.memcnt; ++i) {
+    for (int j = 0; j < config.memcnt; ++j) {
+      sim.topology()->add_edge(hosts[i]->id(), snoops[j]->id());
+    }
+    sim.topology()->add_edge(snoops[i]->id(), mems[i]->id());
+  }
   sim.topology()->build_route();
 
   // Build a notifier, triggered when a device is receiving a packet.
@@ -169,11 +215,15 @@ void epoch(EpochConfig &config) {
   xerxes::global_init(notifier_func, fout, config.loglevel, pkt_logger);
 
   // Add end points to the host.
-  host0.add_end_point(mem.id(), 0, config.capa, true);
-  host1.add_end_point(mem.id(), 0, config.capa, false);
+  for (int i = 0; i < config.memcnt; ++i) {
+    for (int j = 0; j < config.memcnt; ++j) {
+      hosts[i]->add_end_point(mems[j]->id(), 0, config.capa,
+                              i == j ? false : true);
+    }
+  }
 
   auto &notifier = *xerxes::Notifier::glb();
-  auto issue_cnt0 = 0, issue_cnt1 = 0;
+  std::vector<size_t> issue_cnts = std::vector<size_t>(config.memcnt, 0);
   auto ratio = config.ratio;
   auto type = [&](int issue_cnt) {
     if (ratio == 0) {
@@ -186,45 +236,60 @@ void epoch(EpochConfig &config) {
     }
   };
 
-  int first_host = 0;
-  while (!host0.all_issued() || !host1.all_issued()) {
-    bool res0 = true, res1 = true;
-    while (res0 || res1) {
-      if (first_host == 0) {
-        if (res0) {
-          res0 = host0.step(type(issue_cnt0));
-          issue_cnt0 += (int)(res0);
+  size_t first_host = 0;
+  std::vector<bool> res = std::vector<bool>(config.memcnt, true);
+  while (true) {
+    bool finished = true;
+    for (auto host : hosts) {
+      if (!host->all_issued()) {
+        finished = false;
+        break;
+      }
+    }
+    if (finished) {
+      break;
+    }
+    for (int i = 0; i < config.memcnt; ++i) {
+      res[i] = true;
+    }
+    while (true) {
+      int failed_cnt = 0;
+      for (int i = 0; i < config.memcnt; ++i) {
+        auto h = (i + first_host) % config.memcnt;
+        if (res[h]) {
+          res[h] = hosts[h]->step(type(issue_cnts[h]));
+          issue_cnts[h] += (int)(res[h]);
         }
-        if (res1) {
-          res1 = host1.step(type(issue_cnt1));
-          issue_cnt1 += (int)(res1);
+        if (!res[h]) {
+          failed_cnt++;
         }
-        first_host = 1;
-      } else {
-        if (res1) {
-          res1 = host1.step(type(issue_cnt1));
-          issue_cnt1 += (int)(res1);
-        }
-        if (res0) {
-          res0 = host0.step(type(issue_cnt0));
-          issue_cnt0 += (int)(res0);
-        }
-        first_host = 0;
+      }
+      first_host = (first_host + 1) % config.memcnt;
+      if (failed_cnt == config.memcnt) {
+        break;
       }
     }
     auto rem = notifier.step();
-    if (!res0 || !res1 || rem == 0) {
+    if (rem == 0) {
       for (int i = 0; i < config.grain; ++i) {
-        mem.clock();
+        for (int j = 0; j < config.memcnt; ++j) {
+          mems[j]->clock();
+        }
       }
     }
   }
   auto clock_cnt = 0;
-  while (!host0.q_empty() && !host1.q_empty() &&
+  std::set<int> emptied = {};
+  while ((int)emptied.size() < config.memcnt &&
          (clock_cnt++) < config.max_clock) {
     notifier.step();
     for (int i = 0; i < config.grain; ++i) {
-      mem.clock();
+      for (int j = 0; j < config.memcnt; ++j) {
+        mems[j]->clock();
+        if (hosts[j]->q_empty() && !emptied.count(j)) {
+          emptied.insert(j);
+        }
+      }
     }
   }
 
@@ -232,8 +297,25 @@ void epoch(EpochConfig &config) {
   std::fstream stats_out = std::fstream(config.stats_out, std::ios::out);
   // Use `log_route()` to log the route table.
   // sim.topology()->log_route(stats_out);
-  host0.log_stats(stats_out);
-  host1.log_stats(stats_out);
-  snoop.log_stats(stats_out);
+  stats_out << "Host average bandwidth (GB/s): " << std::endl;
+  double total_bw = 0;
+  for (int i = 0; i < config.memcnt; ++i) {
+    stats_out << " * " << hosts[i]->name() << ": " << hosts[i]->avg_bw()
+              << std::endl;
+    total_bw += hosts[i]->avg_bw();
+  }
+  stats_out << " * Total: " << total_bw << std::endl;
+
+  stats_out << "Snoop average conflict count: " << std::endl;
+  double total_conflict = 0;
+  for (int i = 0; i < config.memcnt; ++i) {
+    stats_out << " * " << snoops[i]->name() << ": "
+              << snoops[i]->avg_conflict_cnt() << std::endl;
+    total_conflict += snoops[i]->avg_conflict_cnt();
+  }
+  stats_out << " * Total: " << total_conflict << std::endl;
   // bus.log_stats(stats_out);
+
+  config.avg_bw__and__avg_conflict_cnt =
+      std::make_pair(total_bw, total_conflict);
 }

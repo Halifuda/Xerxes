@@ -4,6 +4,7 @@
 #include "utils.hpp"
 
 #include <map>
+#include <unordered_set>
 #include <utility>
 
 namespace xerxes {
@@ -31,40 +32,11 @@ public:
     virtual ssize_t find_victim(size_t set_i, bool do_evict) = 0;
   };
 
-  class FIFO : public SnoopEviction {
-  private:
-    std::vector<std::deque<size_t>> fifo;
-
-  public:
-    FIFO() : SnoopEviction() {}
-    void init(size_t size, size_t assoc) override {
-      SnoopEviction::init(size, assoc);
-      fifo.resize(setn, std::deque<size_t>());
-    }
-    void on_insert(Addr addr, size_t set_i, size_t way_i) override {
-      if (fifo[set_i].size() == assoc)
-        fifo[set_i].pop_back();
-      fifo[set_i].push_front(way_i);
-    }
-    void on_update(Addr addr, size_t set_i, size_t way_i) override {
-      auto &q = fifo[set_i];
-      for (auto it = q.begin(); it != q.end(); ++it) {
-        if (*it == way_i) {
-          q.erase(it);
-          break;
-        }
-      }
-      q.push_front(way_i);
-    }
-    ssize_t find_victim(size_t set_i, bool do_evict) override {
-      if (fifo[set_i].empty())
-        return -1;
-      auto victim = fifo[set_i].front();
-      if (do_evict)
-        fifo[set_i].pop_front();
-      return victim;
-    }
-  };
+  class FIFO;
+  class LIFO;
+  class LRU;
+  class MRU;
+  class Random;
 
 private:
   size_t line_num;
@@ -273,10 +245,7 @@ public:
       eviction->init(this->line_num, assoc);
   }
 
-  ~Snoop() {
-    if (eviction)
-      delete eviction;
-  }
+  ~Snoop() {}
 
   void transit() override {
     // filter all packets
@@ -294,6 +263,179 @@ public:
       os << " - host " << host << " conflict count: " << count << std::endl;
     }
   }
+
+  // TODO: TEMP
+  double avg_conflict_cnt() {
+    double sum = 0;
+    for (auto &pair : host_trig_conflict_count) {
+      sum += pair.second;
+    }
+    return sum / host_trig_conflict_count.size();
+  }
+
+  class FIFO : public SnoopEviction {
+  protected:
+    std::vector<std::list<size_t>> queues;
+
+  public:
+    FIFO() : SnoopEviction() {}
+
+    void init(size_t size, size_t assoc) override {
+      SnoopEviction::init(size, assoc);
+      queues.resize(setn, std::list<size_t>{});
+    }
+
+    void on_invalidate(Addr addr, size_t set_i, size_t way_i) override {
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (*it == way_i) {
+          q.erase(it);
+          return;
+        }
+      }
+    }
+
+    void on_insert(Addr addr, size_t set_i, size_t way_i) override {
+      bool exist = false;
+      for (auto &way : queues[set_i]) {
+        if (way == way_i) {
+          exist = true;
+          break;
+        }
+      }
+      if (!exist) {
+        if (queues[set_i].size() == assoc) {
+          queues[set_i].pop_back();
+        }
+        queues[set_i].push_front(way_i);
+      }
+    }
+
+    void on_update(Addr addr, size_t set_i, size_t way_i) override {
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (*it == way_i) {
+          q.erase(it);
+          break;
+        }
+      }
+      q.push_front(way_i);
+    }
+
+    ssize_t find_victim(size_t set_i, bool do_evict) override {
+      if (queues[set_i].empty())
+        return -1;
+      auto victim = queues[set_i].back();
+      if (do_evict)
+        queues[set_i].pop_back();
+      return victim;
+    }
+  };
+
+  class LIFO : public FIFO {
+  public:
+    LIFO() : FIFO() {}
+    /*
+      on_insert() and on_update() are the same as FIFO.
+      The front of the queue is the last inserted way.
+    */
+    ssize_t find_victim(size_t set_i, bool do_evict) override {
+      if (queues[set_i].empty())
+        return -1;
+      auto victim = queues[set_i].front();
+      if (do_evict)
+        queues[set_i].pop_front();
+      return victim;
+    }
+  };
+
+  class LRU : public FIFO {
+  public:
+    LRU() : FIFO() {}
+
+    /*
+      When update queue on hit, the front of the queue is the most recently
+      used way, and the back of the queue is the least recently used way.
+    */
+
+    void on_hit(Addr addr, size_t set_i, size_t way_i) override {
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (*it == way_i) {
+          q.erase(it);
+          q.push_front(way_i);
+          return;
+        }
+      }
+    }
+
+    void on_insert(Addr addr, size_t set_i, size_t way_i) override {
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (*it == way_i) {
+          q.erase(it);
+          break;
+        }
+      }
+      if (queues[set_i].size() == assoc) {
+        queues[set_i].pop_back();
+      }
+      queues[set_i].push_front(way_i);
+    }
+  };
+
+  class MRU : public LRU {
+  public:
+    MRU() : LRU() {}
+
+    ssize_t find_victim(size_t set_i, bool do_evict) override {
+      if (queues[set_i].empty())
+        return -1;
+      auto victim = queues[set_i].front();
+      if (do_evict)
+        queues[set_i].pop_front();
+      return victim;
+    }
+  };
+
+  class Random : public SnoopEviction {
+  protected:
+    std::vector<std::unordered_set<size_t>> queues;
+    size_t seed = 19260817;
+
+  public:
+    Random() : SnoopEviction() {}
+
+    void init(size_t size, size_t assoc) override {
+      SnoopEviction::init(size, assoc);
+      queues.resize(setn, std::unordered_set<size_t>{});
+    }
+
+    void on_invalidate(Addr addr, size_t set_i, size_t way_i) override {
+      queues[set_i].erase(way_i * seed);
+    }
+
+    void on_insert(Addr addr, size_t set_i, size_t way_i) override {
+      way_i *= seed;
+      if (queues[set_i].find(way_i) == queues[set_i].end()) {
+        if (queues[set_i].size() == assoc) {
+          auto it = queues[set_i].begin();
+          queues[set_i].erase(it);
+        }
+        queues[set_i].insert(way_i);
+      }
+    }
+
+    ssize_t find_victim(size_t set_i, bool do_evict) override {
+      if (queues[set_i].empty())
+        return -1;
+      auto it = queues[set_i].begin();
+      auto victim = *it;
+      if (do_evict)
+        queues[set_i].erase(it);
+      return victim;
+    }
+  };
 };
 
 } // namespace xerxes

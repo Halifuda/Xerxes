@@ -209,5 +209,16 @@ public:
 
   bool all_issued() { return cur_cnt == count; }
   bool q_empty() { return q.empty(); }
+
+  // TODO: TEMP
+  double avg_bw() {
+    double agg_bw = 0;
+    for (auto &pair : stats) {
+      if (pair.first == -1)
+        continue;
+      agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
+    }
+    return agg_bw;
+  }
 };
 } // namespace xerxes
