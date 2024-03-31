@@ -1,0 +1,8 @@
+#!/bin/bash
+
+mkdir -p output
+mkdir -p build
+mkdir -p debug
+
+cmake -S . -B debug -DCMAKE_BUILD_TYPE=Debug
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=True

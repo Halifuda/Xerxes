@@ -131,7 +131,7 @@ public:
         stats[-1]["Invalidation count"] += 1;
         std::swap(pkt.src, pkt.dst);
         pkt.is_rsp = true;
-        pkt.payload = block_size;
+        pkt.payload = block_size * pkt.burst;
         pkt.arrive += snoop_time;
         pkt.delta_stat(NormalStatType::HOST_INV_DELAY, snoop_time);
         send_pkt(pkt);

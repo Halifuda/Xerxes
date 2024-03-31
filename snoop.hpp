@@ -42,6 +42,7 @@ private:
   size_t line_num;
   size_t assoc;
   size_t set_num;
+  size_t max_burst_inv;
 
   SnoopEviction *eviction;
   bool log_inv = false;
@@ -64,6 +65,7 @@ private:
   std::vector<std::map<PktID, Packet>> waiting;
 
   std::unordered_map<TopoID, double> host_trig_conflict_count;
+  std::unordered_map<size_t, double> burst_inv_size_count;
 
   size_t set_of(Addr addr) { return (addr / 64) % set_num; }
 
@@ -110,6 +112,60 @@ private:
     }
   }
 
+  // TODO: hard-coded block size 64
+  std::pair<Addr, size_t> peek_burst_evict(Addr addr, TopoID owner) {
+    size_t burst = 1;
+    auto begin_addr = addr;
+    auto end_addr = addr;
+    bool flag = true;
+    while (flag && begin_addr <= addr &&
+           addr - begin_addr < max_burst_inv * 64) {
+      auto way = hit(begin_addr - 64, owner);
+      if (way != -1) {
+        begin_addr -= 64;
+        burst += 1;
+      } else {
+        flag = false;
+      }
+    }
+    flag = true;
+    while (flag && end_addr >= addr && end_addr - addr < max_burst_inv * 64) {
+      auto way = hit(end_addr + 64, owner);
+      if (way != -1) {
+        end_addr += 64;
+        burst += 1;
+      } else {
+        flag = false;
+      }
+    }
+    return {begin_addr, burst};
+  }
+
+  void conduct_burst_evict(Addr start, size_t burst, TopoID owner, Tick tick) {
+    for (size_t i = 0; i < burst; ++i) {
+      auto way = hit(start + i * 64, owner);
+      if (way != -1) {
+        auto &line = cache[set_of(start + i * 64)][way];
+        line.state = EVICTING;
+      }
+    }
+    auto inv = PktBuilder()
+                   .type(PacketType::INV)
+                   .addr(start)
+                   .payload(0)
+                   .burst(burst)
+                   .sent(tick)
+                   .arrive(0)
+                   .src(self)
+                   .dst(owner)
+                   .is_rsp(false)
+                   .build();
+    Logger::debug() << name() << ": evict packet " << inv.id << ", addr "
+                    << start << ", burst " << burst << ", owner " << owner
+                    << std::endl;
+    send_pkt(inv);
+  }
+
   void evict(size_t set_i, Tick tick) {
     ASSERT(eviction != nullptr, name() + ": eviction policy is null");
     auto &set = cache[set_i];
@@ -118,75 +174,69 @@ private:
                     << "]" << std::endl;
     if (victim != -1) {
       auto &line = set[victim];
-      auto inv = PktBuilder()
-                     .type(PacketType::INV)
-                     .addr(line.addr)
-                     .payload(64)
-                     .sent(tick)
-                     .arrive(0)
-                     .src(self)
-                     .dst(line.owner)
-                     .is_rsp(false)
-                     .build();
-      Logger::debug() << name() << ": evict packet " << inv.id << " [" << set_i
-                      << ": " << victim << "] addr " << line.addr << " owner "
-                      << line.owner << std::endl;
-      send_pkt(inv);
-      line.state = EVICTING;
+      auto peek = peek_burst_evict(line.addr, line.owner);
+
+      if (burst_inv_size_count.find(peek.second) ==
+          burst_inv_size_count.end()) {
+        burst_inv_size_count[peek.second] = 0;
+      }
+      burst_inv_size_count[peek.second] += 1;
+
+      conduct_burst_evict(peek.first, peek.second, line.owner, tick);
     } else {
       // No victim, do nothing.
     }
   }
 
-  void filter(Packet pkt) {
-    if (pkt.is_coherent() && !pkt.is_rsp) {
-      // Coherence packet. Need to record in snoop cache.
-      auto set_i = set_of(pkt.addr);
-      auto way_i = hit(pkt.addr, pkt.src);
-      if (way_i == -1) {
-        // Not hit. Need to allocate a new way.
-        auto new_way_i = new_way(pkt.addr);
-        if (new_way_i == -1) {
-          // No empty way. Need to evict. Packet need to wait until evict done.
-          if (host_trig_conflict_count.find(pkt.src) ==
-              host_trig_conflict_count.end()) {
-            host_trig_conflict_count[pkt.src] = 0;
-          }
-          host_trig_conflict_count[pkt.src] += 1;
-          Logger::debug() << name() << ": pkt " << pkt.id << " wait evict ["
-                          << set_i << "]" << std::endl;
-          waiting[set_i].insert(std::make_pair(pkt.id, pkt));
-          evict(set_i, pkt.arrive);
-        } else {
-          // Empty way. Allocate.
-          Logger::debug() << name() << ": pkt " << pkt.id << " allocate ["
-                          << set_i << ":" << new_way_i << "]" << std::endl;
-          update(pkt.addr, set_i, new_way_i, pkt.src, WAIT_DRAM, true, false);
-
-          // Directly send the packet.
-          send_pkt(pkt);
+  void coherent_request(Packet pkt) {
+    // Coherence packet. Need to record in snoop cache.
+    auto set_i = set_of(pkt.addr);
+    auto way_i = hit(pkt.addr, pkt.src);
+    if (way_i == -1) {
+      // Not hit. Need to allocate a new way.
+      auto new_way_i = new_way(pkt.addr);
+      if (new_way_i == -1) {
+        // No empty way. Need to evict. Packet need to wait until evict done.
+        if (host_trig_conflict_count.find(pkt.src) ==
+            host_trig_conflict_count.end()) {
+          host_trig_conflict_count[pkt.src] = 0;
         }
+        host_trig_conflict_count[pkt.src] += 1;
+        Logger::debug() << name() << ": pkt " << pkt.id << " wait evict ["
+                        << set_i << "]" << std::endl;
+        waiting[set_i].insert(std::make_pair(pkt.id, pkt));
+        evict(set_i, pkt.arrive);
       } else {
-        Logger::debug() << name() << ": pkt " << pkt.id << " hit at [" << set_i
-                        << ":" << way_i << "]" << std::endl;
-        // Hit. Directly send back (host should hold the data already).
-        std::swap(pkt.src, pkt.dst);
-        pkt.is_rsp = true;
+        // Empty way. Allocate.
+        Logger::debug() << name() << ": pkt " << pkt.id << " allocate ["
+                        << set_i << ":" << new_way_i << "]" << std::endl;
+        update(pkt.addr, set_i, new_way_i, pkt.src, WAIT_DRAM, true, false);
+
+        // Directly send the packet.
         send_pkt(pkt);
       }
-    } else if (pkt.type == PacketType::INV && pkt.is_rsp && pkt.dst == self) {
-      // INV response.
-      if (log_inv)
-        pkt.log_stat();
-      // Update snoop cache.
-      auto tick = pkt.arrive;
-      auto set_i = set_of(pkt.addr);
-      auto way_i = hit(pkt.addr, pkt.src);
-      // Send the write back packet.
-      // TODO: issue delay
-      pkt.type = PacketType::NT_WT;
-      pkt.is_rsp = false;
+    } else {
+      Logger::debug() << name() << ": pkt " << pkt.id << " hit at [" << set_i
+                      << ":" << way_i << "]" << std::endl;
+      // Hit. Directly send back (host should hold the data already).
+      std::swap(pkt.src, pkt.dst);
+      pkt.is_rsp = true;
       send_pkt(pkt);
+    }
+  }
+
+  void invalidate_response(Packet pkt) {
+    // INV response.
+    if (log_inv)
+      pkt.log_stat();
+    // Update snoop cache.
+    auto tick = pkt.arrive;
+    auto addr = pkt.addr;
+    auto burst = pkt.burst;
+    for (size_t i = 0; i < burst; ++i) {
+      auto set_i = set_of(addr + i * 64);
+      auto way_i = hit(addr + i * 64, pkt.src);
+      // TODO: Send the write back packet.
       if (way_i != -1) {
         // Invalidate the line.
         update(0, set_i, way_i, -1, INVALID, false);
@@ -207,6 +257,14 @@ private:
         send_pkt(waiting_it->second);
         waiting[set_i].erase(waiting_it);
       }
+    }
+  }
+
+  void filter(Packet pkt) {
+    if (pkt.is_coherent() && !pkt.is_rsp) {
+      coherent_request(pkt);
+    } else if (pkt.type == PacketType::INV && pkt.is_rsp && pkt.dst == self) {
+      invalidate_response(pkt);
     } else {
       // Non-temporal or response. Directly send the packet.
       if (pkt.is_rsp) {
@@ -231,11 +289,12 @@ private:
   }
 
 public:
-  Snoop(Topology *topology, size_t line_num, size_t assoc,
+  Snoop(Topology *topology, size_t line_num, size_t assoc, size_t max_burst_inv,
         SnoopEviction *eviction = nullptr, bool log_inv = false,
         std::string name = "Snoop")
       : Device(topology, name), line_num(line_num), assoc(assoc),
-        set_num(line_num / assoc), eviction(eviction), log_inv(log_inv) {
+        set_num(line_num / assoc), max_burst_inv(max_burst_inv),
+        eviction(eviction), log_inv(log_inv) {
     ASSERT(line_num % assoc == 0, "snoop: size % assoc != 0");
     cache.resize(set_num);
     for (auto &c : cache)
@@ -262,6 +321,16 @@ public:
       auto &count = pair.second;
       os << " - host " << host << " conflict count: " << count << std::endl;
     }
+    double avg_burst_inv = 0;
+    double total_burst_inv = 0;
+    for (auto &pair : burst_inv_size_count) {
+      auto &burst = pair.first;
+      auto &count = pair.second;
+      avg_burst_inv += burst * count;
+      total_burst_inv += count;
+    }
+    avg_burst_inv /= total_burst_inv;
+    os << " - average burst invalidation size: " << avg_burst_inv << std::endl;
   }
 
   // TODO: TEMP

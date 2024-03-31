@@ -1,4 +1,9 @@
 #!/bin/bash
 
 cmake --build build --target Xerxes
-build/Xerxes
+build/Xerxes 1
+build/Xerxes 2
+build/Xerxes 3
+build/Xerxes 4
+build/Xerxes 5
+build/Xerxes 6
