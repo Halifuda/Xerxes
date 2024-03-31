@@ -35,7 +35,7 @@ private:
   };
 
   Tick delay;
-  std::unordered_map<TopoID, size_t> upstreams;
+  std::unordered_map<TopoID, std::pair<size_t, Tick>> upstreams;
   std::unordered_map<TopoID, Port> ports;
 
   Port &to_port(const Packet &pkt) {
@@ -77,10 +77,12 @@ public:
   Switch(Topology *topology, Tick delay, std::string name = "Switch")
       : Device(topology, name), delay(delay) {}
 
-  void add_upstream(TopoID id) { upstreams.insert({id, 0}); }
+  void add_upstream(TopoID id, Tick delay) {
+    upstreams.insert({id, {0, delay}});
+  }
 
   void transit() override {
-    const size_t wait_for_q = 8; // 1 means no queuing.
+    const size_t wait_for_q = 4; // 1 means no queuing.
     auto pkt = receive_pkt();
     if (pkt.dst == self) {
       return;
@@ -93,9 +95,9 @@ public:
     port.qd_record_cnt += 1;
     port.queues[pkt.from].push(pkt);
     if (upstreams.find(port.id) != upstreams.end()) {
-      upstreams[port.id]++;
-      if (upstreams[port.id] == wait_for_q) {
-        upstreams[port.id] = 0;
+      upstreams[port.id].first++;
+      if (upstreams[port.id].first == wait_for_q) {
+        upstreams[port.id].first = 0;
         for (size_t i = 0; i < wait_for_q; ++i)
           sched(port);
       }
@@ -107,10 +109,14 @@ public:
   void log_stats(std::ostream &os) override {
     os << name() << " stats:\n";
     for (auto &port : ports) {
+      if (upstreams.find(port.first) == upstreams.end())
+        continue;
       os << "Port " << port.first << ":\n";
       os << "  Average queue depth: "
          << port.second.sum_queue_depth / port.second.qd_record_cnt << "\n";
     }
   }
+
+  size_t port_num() const { return ports.size(); }
 };
 } // namespace xerxes

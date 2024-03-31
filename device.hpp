@@ -55,6 +55,5 @@ public:
   }
 
   virtual void log_stats(std::ostream &os) {}
-  virtual double get_stat(std::string name) { return 0; }
 };
 } // namespace xerxes

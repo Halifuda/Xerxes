@@ -100,8 +100,10 @@ public:
     stats[id]["Count"] = 0;
     stats[id]["Bandwidth"] = 0;
     stats[id]["Average latency"] = 0;
-    stats[id]["Average wait for evict"] = 0;
-    stats[-1]["Invalidation count"] = 0;
+    stats[id]["Average switch queuing"] = 0;
+    stats[id]["Average switch time"] = 0;
+    // stats[id]["Average wait for evict"] = 0;
+    // stats[-1]["Invalidation count"] = 0;
     // stats[id]["Average wait on switch"] = 0;
     // stats[id]["Average wait on bus"] = 0;
     // stats[id]["Average wait for packaging"] = 0;
@@ -122,13 +124,13 @@ public:
         stats[pkt.src]["Count"] += 1;
         stats[pkt.src]["Bandwidth"] += pkt.burst * 64;
         stats[pkt.src]["Average latency"] += pkt.arrive - pkt.sent;
-        stats[pkt.src]["Average wait for evict"] +=
-            pkt.get_stat(NormalStatType::SNOOP_EVICT_DELAY);
+        stats[pkt.src]["Average switch queuing"] +=
+            pkt.get_stat(SWITCH_QUEUE_DELAY);
+        stats[pkt.src]["Average switch time"] += pkt.get_stat(SWITCH_TIME);
 
         q.pop(pkt);
         pkt.log_stat();
       } else if (pkt.type == INV) {
-        stats[-1]["Invalidation count"] += 1;
         std::swap(pkt.src, pkt.dst);
         pkt.is_rsp = true;
         pkt.payload = block_size * pkt.burst;
@@ -142,15 +144,41 @@ public:
     send_pkt(pkt);
   }
 
-  void log_stats(std::ostream &os) override {
+  void log_stats_1(std::ostream &os) {
     os << name() << " stats: " << std::endl;
-    os << " * Issued packets: " << cur_cnt << std::endl;
-    os << " * Invalidation count: " << stats[-1]["Invalidation count"]
-       << std::endl;
     double agg_bw = 0;
     double agg_cnt = 0;
     double agg_lat = 0;
-    double agg_wait = 0;
+    double agg_q = 0;
+    double agg_sw = 0;
+    for (auto &pair : stats) {
+      if (pair.first == -1)
+        continue;
+      os << pair.first << ","
+         << pair.second["Bandwidth"] / (double)(last_arrive) << ","
+         << pair.second["Average latency"] / pair.second["Count"] << ","
+         << pair.second["Average switch queuing"] / pair.second["Count"] << ","
+         << pair.second["Average switch time"] / pair.second["Count"]
+         << std::endl;
+
+      agg_cnt += pair.second["Count"];
+      agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
+      agg_lat += pair.second["Average latency"];
+      agg_q += pair.second["Average switch queuing"];
+      agg_sw += pair.second["Average switch time"];
+    }
+    os << "Aggregate," << agg_bw << "," << agg_lat / agg_cnt << ","
+       << agg_q / agg_cnt << "," << agg_sw / agg_cnt << std::endl;
+  }
+
+  void log_stats(std::ostream &os) override {
+    os << name() << " stats: " << std::endl;
+    os << " * Issued packets: " << cur_cnt << std::endl;
+    double agg_bw = 0;
+    double agg_cnt = 0;
+    double agg_lat = 0;
+    double agg_q = 0;
+    double agg_sw = 0;
     for (auto &pair : stats) {
       if (pair.first == -1)
         continue;
@@ -164,16 +192,21 @@ public:
          << pair.second["Average latency"] / pair.second["Count"] << std::endl;
       agg_lat += pair.second["Average latency"];
 
-      os << "   - Average wait for evict (ns): "
-         << pair.second["Average wait for evict"] / pair.second["Count"]
+      os << "   - Average switch queuing (ns): "
+         << pair.second["Average switch queuing"] / pair.second["Count"]
          << std::endl;
-      agg_wait += pair.second["Average wait for evict"];
+      agg_q += pair.second["Average switch queuing"];
+
+      os << "   - Average switch time (ns): "
+         << pair.second["Average switch time"] / pair.second["Count"]
+         << std::endl;
+      agg_sw += pair.second["Average switch time"];
     }
     os << " * Aggregate: " << std::endl;
     os << "   - Bandwidth (GB/s): " << agg_bw << std::endl;
     os << "   - Average latency (ns): " << agg_lat / agg_cnt << std::endl;
-    os << "   - Average wait for evict (ns): " << agg_wait / agg_cnt
-       << std::endl;
+    os << "   - Average switch queuing (ns): " << agg_q / agg_cnt << std::endl;
+    os << "   - Average switch time (ns): " << agg_sw / agg_cnt << std::endl;
   }
 
   bool step(PacketType type) {
@@ -209,16 +242,5 @@ public:
 
   bool all_issued() { return cur_cnt == count; }
   bool q_empty() { return q.empty(); }
-
-  // TODO: TEMP
-  double avg_bw() {
-    double agg_bw = 0;
-    for (auto &pair : stats) {
-      if (pair.first == -1)
-        continue;
-      agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
-    }
-    return agg_bw;
-  }
 };
 } // namespace xerxes

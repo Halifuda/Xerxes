@@ -71,27 +71,28 @@ public:
     for (auto &r : router)
       r.resize(nodes.size(), -1);
 
-    for (size_t i = 0; i < nodes.size(); i++) {
-      for (auto &n : nodes[i].neighbors_)
-        router[i][n] = n;
+    struct BFSEntry {
+      TopoID from_neighbor;
+      TopoID cur;
+    };
 
-      for (auto &n : nodes[i].neighbors_) {
-        // make the router, i -> n -> x, router[i][x] = n
-        std::queue<TopoID> q;
-        std::set<TopoID> visited;
-        q.push(n);
-        visited.insert(n);
-        while (!q.empty()) {
-          auto cur = q.front();
-          q.pop();
-          for (auto &nn : nodes[cur].neighbors_) {
-            if (visited.find(nn) == visited.end()) {
-              visited.insert(nn);
-              if (router[i][nn] == -1) {
-                q.push(nn);
-                router[i][nn] = n;
-              }
-            }
+    for (size_t i = 0; i < nodes.size(); i++) {
+      std::queue<BFSEntry> q;
+      std::set<TopoID> visited;
+      for (auto &neighbor : nodes[i].neighbors_) {
+        router[i][neighbor] = neighbor;
+        q.push({neighbor, neighbor});
+      }
+      while (!q.empty()) {
+        auto entry = q.front();
+        q.pop();
+        if (visited.find(entry.cur) != visited.end())
+          continue;
+        visited.insert(entry.cur);
+        for (auto &next : nodes[entry.cur].neighbors_) {
+          if (visited.find(next) == visited.end()) {
+            router[i][next] = entry.from_neighbor;
+            q.push({entry.from_neighbor, next});
           }
         }
       }

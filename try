@@ -1,9 +1,12 @@
 #!/bin/bash
 
 cmake --build build --target Xerxes
-build/Xerxes 1
-build/Xerxes 2
-build/Xerxes 3
-build/Xerxes 4
-build/Xerxes 5
-build/Xerxes 6
+
+topo_list=("chain" "tree" "star" "ring" "full")
+memcnt_list=(4 8 16)
+
+for memcnt in ${memcnt_list[@]}; do
+    for topo in ${topo_list[@]}; do
+        build/Xerxes $topo $memcnt
+    done
+done
