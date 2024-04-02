@@ -4,6 +4,7 @@
 #include "device.hpp"
 #include "utils.hpp"
 
+#include <iomanip>
 #include <random>
 #include <set>
 
@@ -100,12 +101,12 @@ public:
     stats[id]["Count"] = 0;
     stats[id]["Bandwidth"] = 0;
     stats[id]["Average latency"] = 0;
-    stats[id]["Average switch queuing"] = 0;
-    stats[id]["Average switch time"] = 0;
+    // stats[id]["Average switch queuing"] = 0;
+    // stats[id]["Average switch time"] = 0;
     // stats[id]["Average wait for evict"] = 0;
     // stats[-1]["Invalidation count"] = 0;
     // stats[id]["Average wait on switch"] = 0;
-    // stats[id]["Average wait on bus"] = 0;
+    stats[id]["Average wait on bus"] = 0;
     // stats[id]["Average wait for packaging"] = 0;
     // stats[id]["Average wait burst"] = 0;
     return *this;
@@ -124,9 +125,7 @@ public:
         stats[pkt.src]["Count"] += 1;
         stats[pkt.src]["Bandwidth"] += pkt.burst * 64;
         stats[pkt.src]["Average latency"] += pkt.arrive - pkt.sent;
-        stats[pkt.src]["Average switch queuing"] +=
-            pkt.get_stat(SWITCH_QUEUE_DELAY);
-        stats[pkt.src]["Average switch time"] += pkt.get_stat(SWITCH_TIME);
+        stats[pkt.src]["Average wait on bus"] += pkt.get_stat(BUS_QUEUE_DELAY);
 
         q.pop(pkt);
         pkt.log_stat();
@@ -144,31 +143,29 @@ public:
     send_pkt(pkt);
   }
 
-  void log_stats_1(std::ostream &os) {
+  void log_stats_csv(std::ostream &os) {
     os << name() << " stats: " << std::endl;
     double agg_bw = 0;
     double agg_cnt = 0;
     double agg_lat = 0;
     double agg_q = 0;
-    double agg_sw = 0;
+    os << std::fixed << std::setprecision(4);
     for (auto &pair : stats) {
       if (pair.first == -1)
         continue;
       os << pair.first << ","
-         << pair.second["Bandwidth"] / (double)(last_arrive) << ","
+         << pair.second["Bandwidth"] * 1000 / (double)(last_arrive) << ","
          << pair.second["Average latency"] / pair.second["Count"] << ","
-         << pair.second["Average switch queuing"] / pair.second["Count"] << ","
-         << pair.second["Average switch time"] / pair.second["Count"]
+         << pair.second["Average wait on bus"] / pair.second["Count"]
          << std::endl;
 
       agg_cnt += pair.second["Count"];
-      agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
+      agg_bw += pair.second["Bandwidth"] * 1000 / (double)(last_arrive);
       agg_lat += pair.second["Average latency"];
-      agg_q += pair.second["Average switch queuing"];
-      agg_sw += pair.second["Average switch time"];
+      agg_q += pair.second["Average wait on bus"];
     }
     os << "Aggregate," << agg_bw << "," << agg_lat / agg_cnt << ","
-       << agg_q / agg_cnt << "," << agg_sw / agg_cnt << std::endl;
+       << agg_q / agg_cnt << std::endl;
   }
 
   void log_stats(std::ostream &os) override {
@@ -185,28 +182,29 @@ public:
       agg_cnt += pair.second["Count"];
       os << " * Endpoint " << pair.first << ": " << std::endl;
       os << "   - Bandwidth (GB/s): "
-         << pair.second["Bandwidth"] / (double)(last_arrive) << std::endl;
-      agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
+         << pair.second["Bandwidth"] * 1000 / (double)(last_arrive)
+         << std::endl;
+      agg_bw += pair.second["Bandwidth"] * 1000 / (double)(last_arrive);
 
-      os << "   - Average latency (ns): "
+      os << "   - Average latency (ps): "
          << pair.second["Average latency"] / pair.second["Count"] << std::endl;
       agg_lat += pair.second["Average latency"];
 
-      os << "   - Average switch queuing (ns): "
+      os << "   - Average switch queuing (ps): "
          << pair.second["Average switch queuing"] / pair.second["Count"]
          << std::endl;
       agg_q += pair.second["Average switch queuing"];
 
-      os << "   - Average switch time (ns): "
+      os << "   - Average switch time (ps): "
          << pair.second["Average switch time"] / pair.second["Count"]
          << std::endl;
       agg_sw += pair.second["Average switch time"];
     }
     os << " * Aggregate: " << std::endl;
     os << "   - Bandwidth (GB/s): " << agg_bw << std::endl;
-    os << "   - Average latency (ns): " << agg_lat / agg_cnt << std::endl;
-    os << "   - Average switch queuing (ns): " << agg_q / agg_cnt << std::endl;
-    os << "   - Average switch time (ns): " << agg_sw / agg_cnt << std::endl;
+    os << "   - Average latency (ps): " << agg_lat / agg_cnt << std::endl;
+    os << "   - Average switch queuing (ps): " << agg_q / agg_cnt << std::endl;
+    os << "   - Average switch time (ps): " << agg_sw / agg_cnt << std::endl;
   }
 
   bool step(PacketType type) {

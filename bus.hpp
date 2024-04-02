@@ -8,7 +8,12 @@
 namespace xerxes {
 class DuplexBus : public Device {
 private:
-  std::map<TopoID, std::map<TopoID, Timeline>> routes;
+  struct Route {
+    Timeline timeline;
+    std::map<Tick, bool> direction; // false: small to big
+  };
+
+  std::map<TopoID, std::map<TopoID, Route>> routes;
   bool is_full;
   Tick half_rev_time;
   // Packet total delay = delay_per_T * size / width
@@ -19,16 +24,34 @@ private:
 
   std::map<std::string, double> stats;
 
-  Timeline &get_or_init_route(TopoID from, TopoID to) {
+  Tick reverse_time(TopoID from, TopoID to, Tick arrive) {
+    if (is_full)
+      return 0;
+    auto &route = get_or_init_route(from, to);
+    auto &direction = route.direction;
+    // TODO: rather approximate
+    auto it = direction.lower_bound(arrive);
+
+    bool direct = from > to;
+    if (it->second != direct) {
+      direction.insert({arrive, it->second});
+      it->second = direct;
+      stats["Direction reverse count"] += 1;
+      return half_rev_time;
+    }
+    return 0;
+  }
+
+  Route &get_or_init_route(TopoID from, TopoID to) {
     if (!is_full && from > to) {
       // shared by both directions
       std::swap(from, to);
-      stats["Direction reverse count"] += 1;
     }
     if (routes.find(from) == routes.end()) {
-      routes[from] = std::map<TopoID, Timeline>();
+      routes[from] = std::map<TopoID, Route>();
       if (routes[from].find(to) == routes[from].end()) {
-        routes[from][to] = Timeline{};
+        routes[from][to] = {Timeline{}, std::map<Tick, bool>{}};
+        routes[from][to].direction.insert({LONG_LONG_MAX, false});
       }
     }
     return routes[from][to];
@@ -67,8 +90,8 @@ public:
     size_t frame = (pkt.payload + frame_size) / frame_size;
     auto &route = get_or_init_route(pkt.from, to->id());
     auto delay = ((frame * frame_size + width - 1) / width) * delay_per_T;
-    auto rev = is_full ? 0 : half_rev_time;
-    auto transfer_time = route.transfer_time(pkt.arrive + rev, delay);
+    auto rev = reverse_time(pkt.from, to->id(), pkt.arrive);
+    auto transfer_time = route.timeline.transfer_time(pkt.arrive + rev, delay);
 
     pkt.delta_stat(BUS_QUEUE_DELAY, (double)(transfer_time - pkt.arrive));
     pkt.delta_stat(FRAMING_TIME, (double)framing_time);

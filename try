@@ -2,11 +2,14 @@
 
 cmake --build build --target Xerxes
 
-topo_list=("chain" "tree" "star" "ring" "full")
-memcnt_list=(4 8 16)
+bus_list=(1 0)
+ratio_list=("0.01" "0.25" "0.5" "0.75" "1")
 
-for memcnt in ${memcnt_list[@]}; do
-    for topo in ${topo_list[@]}; do
-        build/Xerxes $topo $memcnt
+# bus_list=(1)
+# ratio_list=("0.25")
+
+for ratio in ${ratio_list[@]}; do
+    for bus in ${bus_list[@]}; do
+        build/Xerxes $bus $ratio
     done
 done

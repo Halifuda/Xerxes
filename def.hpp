@@ -314,7 +314,7 @@ public:
 
   std::map<Tick, Scope> scopes;
 
-  Timeline() { scopes[INT_MAX] = Scope{0, INT_MAX}; }
+  Timeline() { scopes[LONG_LONG_MAX] = Scope{0, LONG_LONG_MAX}; }
 
   Tick transfer_time(Tick arrive, Tick delay) {
     Logger::debug() << "Timeline transfer time: " << arrive << ", delay "

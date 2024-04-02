@@ -36,9 +36,12 @@ private:
           issued[pkt.addr] = std::list<Packet>();
         issued[pkt.addr].push_back(pkt);
         to_erase.push_back(it);
-        pkt.delta_stat(DRAM_INTERFACE_QUEUING_DELAY,
-                       (double)(interface_clock * tick_per_clock - pkt.arrive));
-        pkt.arrive += interface_clock * tick_per_clock;
+        if (interface_clock * tick_per_clock > pkt.arrive) {
+          pkt.delta_stat(
+              DRAM_INTERFACE_QUEUING_DELAY,
+              (double)(interface_clock * tick_per_clock - pkt.arrive));
+          pkt.arrive = interface_clock * tick_per_clock;
+        }
         memsys.AddTransaction(pkt.addr - start, pkt.is_write());
       }
     }
