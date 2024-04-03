@@ -143,7 +143,7 @@ public:
     send_pkt(pkt);
   }
 
-  void log_stats_csv(std::ostream &os) {
+  double log_stats_csv(std::ostream &os) {
     os << name() << " stats: " << std::endl;
     double agg_bw = 0;
     double agg_cnt = 0;
@@ -166,6 +166,7 @@ public:
     }
     os << "Aggregate," << agg_bw << "," << agg_lat / agg_cnt << ","
        << agg_q / agg_cnt << std::endl;
+    return agg_bw;
   }
 
   void log_stats(std::ostream &os) override {

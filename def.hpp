@@ -150,6 +150,7 @@ struct Packet {
    * @return true if the packet is a write request.
    */
   bool is_write() { return type == WT || type == NT_WT; }
+  bool is_read() { return type == RD || type == NT_RD; }
   /**
    * @brief Check if the packet is a coherent request (RD/WT).
    * @return true if the packet is a coherent request (RD/WT).

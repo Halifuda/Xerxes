@@ -2,6 +2,8 @@
 #include "def.hpp"
 #include "device.hpp"
 
+#include <unordered_set>
+
 namespace xerxes {
 class Switch : public Device {
 private:
@@ -118,5 +120,48 @@ public:
   }
 
   size_t port_num() const { return ports.size(); }
+};
+
+class DeviceBuffer : public Device {
+private:
+  size_t capacity;
+  std::queue<Packet> pending;
+  std::unordered_set<PktID> rd;
+  std::unordered_set<PktID> wt;
+
+public:
+  DeviceBuffer(Topology *topology, size_t capacity,
+               std::string name = "DeviceBuffer")
+      : Device(topology, name), capacity(capacity) {}
+
+  void transit() override {
+    auto pkt = receive_pkt();
+    if (pkt.dst == self) {
+      return;
+    }
+    if (!pkt.is_read() && !pkt.is_write()) {
+      send_pkt(pkt);
+    }
+
+    std::unordered_set<PktID> &buf = pkt.is_read() ? rd : wt;
+    if (pkt.is_rsp) {
+      buf.erase(pkt.id);
+      if (!pending.empty()) {
+        auto next = pending.front();
+        pending.pop();
+        buf.insert(next.id);
+        next.arrive = std::max(next.arrive, pkt.arrive);
+        send_pkt(next);
+      }
+      send_pkt(pkt);
+    } else {
+      if (buf.size() < capacity) {
+        buf.insert(pkt.id);
+        send_pkt(pkt);
+      } else {
+        pending.push(pkt);
+      }
+    }
+  }
 };
 } // namespace xerxes

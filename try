@@ -2,14 +2,14 @@
 
 cmake --build build --target Xerxes
 
-bus_list=(1 0)
-ratio_list=("0.01" "0.25" "0.5" "0.75" "1")
+memcnt_list=(1 2 4 8)
+ratio_list=("0.01" "0.25" "0.33" "0.5" "0.66" "0.75" "1")
 
-# bus_list=(1)
-# ratio_list=("0.25")
+# memcnt_list=(2)
+# ratio_list=("0.5")
 
-for ratio in ${ratio_list[@]}; do
-    for bus in ${bus_list[@]}; do
-        build/Xerxes $bus $ratio
+for memcnt in ${memcnt_list[@]}; do
+    for ratio in ${ratio_list[@]}; do
+        build/Xerxes $memcnt $ratio
     done
 done
