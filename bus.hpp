@@ -93,9 +93,14 @@ public:
     auto &route = get_or_init_route(pkt.from, to->id());
     auto delay = ((frame * frame_size + width - 1) / width) * delay_per_T;
     auto rev = reverse_time(pkt.from, to->id(), pkt.arrive);
-    auto transfer_time = route.timeline.transfer_time(pkt.arrive + rev, delay);
+    if (rev > 0) {
+      auto finish_rev = route.timeline.transfer_time(pkt.arrive, rev);
+      if (finish_rev > pkt.arrive)
+        pkt.arrive = finish_rev;
+    }
+    auto transfer_time = route.timeline.transfer_time(pkt.arrive, delay);
     route.occupy += delay;
-    route.last_occupy = std::max(route.last_occupy, pkt.arrive + rev + delay);
+    route.last_occupy = std::max(route.last_occupy, pkt.arrive + delay);
 
     pkt.delta_stat(BUS_QUEUE_DELAY, (double)(transfer_time - pkt.arrive));
     pkt.delta_stat(FRAMING_TIME, (double)framing_time);
