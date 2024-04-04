@@ -42,22 +42,27 @@ struct EpochConfig {
   int memcnt;
   std::string output;
   std::string stats_out;
+
+  double bw = 0;
+  double util = 0;
+  double eff = 0;
 };
 
-double epoch(EpochConfig &);
+void epoch(EpochConfig &);
 
 int main(int argc, char *argv[]) {
   const size_t tick = 1000;
   auto config = EpochConfig{
-      1000,     20,        0,         1,           1,
-      true,     true,      0,         31,          2,
-      16,       1,         80 * tick, 2 * tick,    (64 * 600),
-      1 * tick, 40 * tick, 10,        10000,       "output/dram.ini",
-      80000,    128,       128,       1,           xerxes::LogLevel::INFO,
-      0,        1,         8,         "/dev/null", "/dev/null"};
+      1000,     20,       0,        1,           1,
+      true,     true,     0,        20,          1,
+      8,        64,       0 * tick, 0 * tick,    (64 * 600),
+      1 * tick, 0 * tick, 10,       10000,       "output/dram.ini",
+      80000,    128,      128,      1,           xerxes::LogLevel::INFO,
+      0,        1,        8,        "/dev/null", "/dev/null"};
 
-  config.memcnt = atoi(argv[1]);
-  config.ratio = atof(argv[2]);
+  config.frame_size = atoi(argv[1]);
+  config.memcnt = atoi(argv[2]);
+  config.ratio = atof(argv[3]);
   config.cnt = config.memcnt * 3000;
   config.hostq = config.memcnt * 16;
 
@@ -66,18 +71,24 @@ int main(int argc, char *argv[]) {
   // config.output = prefix + ".csv";
   // config.stats_out = prefix + "_stats.csv";
 
-  std::cout << "Epoch [mem=" << config.memcnt << ", ratio=" << config.ratio
-            << "]..." << std::flush;
-  auto bw = epoch(config) / 1000;
+  std::cout << "Epoch [frame=" << config.frame_size << ", mem=" << config.memcnt
+            << ", ratio=" << config.ratio << "]..." << std::flush;
+  epoch(config);
+  auto bw = config.bw;
+  auto util = config.util;
+  auto eff = config.eff;
   std::cout << "done." << std::endl;
 
-  auto sum_output = std::fstream("output/summary.csv", std::ios::app);
-  sum_output << config.memcnt << "," << config.ratio << "," << bw << std::endl;
+  auto sum_output = std::fstream(
+      "output/summary_framesize=" + std::to_string(config.frame_size) + ".csv",
+      std::ios::app);
+  sum_output << config.memcnt << "," << config.ratio << "," << bw << "," << util
+             << "," << eff << std::endl;
 
   return 0;
 }
 
-double epoch(EpochConfig &config) {
+void epoch(EpochConfig &config) {
   // Make simulation skeleton.
   auto sim = xerxes::Simulation{};
 
@@ -271,5 +282,7 @@ double epoch(EpochConfig &config) {
               << ", total: " << issue_cnts[i] << std::endl;
   }
   bus->log_stats(stats_out);
-  return agg_bw;
+  config.bw = agg_bw;
+  config.util = bus->avg_utilization();
+  config.eff = bus->efficiency();
 }

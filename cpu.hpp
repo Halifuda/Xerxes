@@ -154,13 +154,13 @@ public:
       if (pair.first == -1)
         continue;
       os << pair.first << ","
-         << pair.second["Bandwidth"] * 1000 / (double)(last_arrive) << ","
+         << pair.second["Bandwidth"] / (double)(last_arrive) << ","
          << pair.second["Average latency"] / pair.second["Count"] << ","
          << pair.second["Average wait on bus"] / pair.second["Count"]
          << std::endl;
 
       agg_cnt += pair.second["Count"];
-      agg_bw += pair.second["Bandwidth"] * 1000 / (double)(last_arrive);
+      agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
       agg_lat += pair.second["Average latency"];
       agg_q += pair.second["Average wait on bus"];
     }

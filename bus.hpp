@@ -11,6 +11,8 @@ private:
   struct Route {
     Timeline timeline;
     std::map<Tick, bool> direction; // false: small to big
+    Tick occupy = 0;
+    Tick last_occupy = 0;
   };
 
   std::map<TopoID, std::map<TopoID, Route>> routes;
@@ -92,6 +94,8 @@ public:
     auto delay = ((frame * frame_size + width - 1) / width) * delay_per_T;
     auto rev = reverse_time(pkt.from, to->id(), pkt.arrive);
     auto transfer_time = route.timeline.transfer_time(pkt.arrive + rev, delay);
+    route.occupy += delay;
+    route.last_occupy = std::max(route.last_occupy, pkt.arrive + rev + delay);
 
     pkt.delta_stat(BUS_QUEUE_DELAY, (double)(transfer_time - pkt.arrive));
     pkt.delta_stat(FRAMING_TIME, (double)framing_time);
@@ -120,6 +124,34 @@ public:
        << (double)stats["Transfered_payloads"] /
               (double)stats["Transfered_bytes"]
        << std::endl;
+    double utils = 0;
+    double cnt = 0;
+    for (auto &from : routes) {
+      for (auto &to : from.second) {
+        utils += (double)to.second.occupy / (double)to.second.last_occupy;
+        cnt += 1;
+      }
+    }
+    os << "Average utilization: " << utils / cnt << std::endl;
+  }
+
+  // TODO: TEMP
+  double avg_utilization() {
+    double utils = 0;
+    double cnt = 0;
+    for (auto &from : routes) {
+      for (auto &to : from.second) {
+        utils += (double)to.second.occupy / (double)to.second.last_occupy;
+        cnt += 1;
+      }
+    }
+    return utils / cnt;
+  }
+
+  // TODO: TEMP
+  double efficiency() {
+    return (double)stats["Transfered_payloads"] /
+           (double)stats["Transfered_bytes"];
   }
 };
 } // namespace xerxes
