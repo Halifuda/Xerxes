@@ -86,7 +86,7 @@ void epoch(EpochConfig &config) {
   std::vector<xerxes::Host *> hosts = {};
   std::vector<xerxes::DRAMsim3Interface *> mems = {};
   for (int i = 0; i < host_cnt; ++i) {
-    hosts.push_back(new xerxes::Host{sim.topology(), config.hostq,
+    hosts.push_back(new xerxes::Host{sim.topology(), config.hostq, 128,
                                      config.host_inv_time, config.cnt,
                                      config.hostd, config.burst});
   }

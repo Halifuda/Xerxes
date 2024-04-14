@@ -4,7 +4,6 @@
 #include "utils.hpp"
 
 #include <map>
-#include <unordered_set>
 #include <utility>
 
 namespace xerxes {
@@ -29,6 +28,7 @@ public:
     virtual void on_update(Addr addr, size_t set_i, size_t way_i) {}
     virtual void on_insert(Addr addr, size_t set_i, size_t way_i) {}
     virtual void on_invalidate(Addr addr, size_t set_i, size_t way_i) {}
+    virtual void on_evict(Addr addr, size_t set_i, size_t way_i) {}
     virtual ssize_t find_victim(size_t set_i, bool do_evict) = 0;
   };
 
@@ -36,7 +36,7 @@ public:
   class LIFO;
   class LRU;
   class MRU;
-  class Random;
+  class LFI;
 
 private:
   size_t line_num;
@@ -66,6 +66,7 @@ private:
 
   std::unordered_map<TopoID, double> host_trig_conflict_count;
   std::unordered_map<size_t, double> burst_inv_size_count;
+  std::unordered_map<Addr, size_t> evict_count;
 
   size_t set_of(Addr addr) { return (addr / 64) % set_num; }
 
@@ -146,7 +147,13 @@ private:
       auto way = hit(start + i * 64, owner);
       if (way != -1) {
         auto &line = cache[set_of(start + i * 64)][way];
+        if (evict_count.find(line.addr) == evict_count.end()) {
+          evict_count[line.addr] = 0;
+        }
+        evict_count[line.addr] += 1;
         line.state = EVICTING;
+        if (eviction != nullptr)
+          eviction->on_evict(line.addr, set_of(start + i * 64), way);
       }
     }
     auto inv = PktBuilder()
@@ -210,18 +217,29 @@ private:
         // Empty way. Allocate.
         Logger::debug() << name() << ": pkt " << pkt.id << " allocate ["
                         << set_i << ":" << new_way_i << "]" << std::endl;
-        update(pkt.addr, set_i, new_way_i, pkt.src, WAIT_DRAM, true, false);
+        update(pkt.addr, set_i, new_way_i, pkt.src, WAIT_DRAM, true, true);
 
         // Directly send the packet.
         send_pkt(pkt);
       }
     } else {
-      Logger::debug() << name() << ": pkt " << pkt.id << " hit at [" << set_i
-                      << ":" << way_i << "]" << std::endl;
-      // Hit. Directly send back (host should hold the data already).
-      std::swap(pkt.src, pkt.dst);
-      pkt.is_rsp = true;
-      send_pkt(pkt);
+      auto &line = cache[set_i][way_i];
+      if (line.owner != pkt.src) {
+        // Conflict. Need to evict the line.
+        auto peek = peek_burst_evict(line.addr, line.owner);
+        conduct_burst_evict(peek.first, peek.second, line.owner, pkt.arrive);
+        // Insert the packet to waiting list.
+        Logger::debug() << name() << ": pkt " << pkt.id << " conflict ["
+                        << set_i << ":" << way_i << "]" << std::endl;
+        waiting[set_i].insert(std::make_pair(pkt.id, pkt));
+      } else {
+        // Hit. Directly send back (host should hold the data already).
+        Logger::debug() << name() << ": pkt " << pkt.id << " hit at [" << set_i
+                        << ":" << way_i << "]" << std::endl;
+        std::swap(pkt.src, pkt.dst);
+        pkt.is_rsp = true;
+        send_pkt(pkt);
+      }
     }
   }
 
@@ -248,7 +266,7 @@ private:
         auto &waiter = waiting_it->second;
         Logger::debug() << name() << ": insert waiter pkt " << waiter.id
                         << " to [" << set_i << ":" << way_i << "]" << std::endl;
-        update(waiter.addr, set_i, way_i, waiter.src, WAIT_DRAM, true, false);
+        update(waiter.addr, set_i, way_i, waiter.src, WAIT_DRAM, true, true);
         // Send the waiting.
         if (tick > waiter.arrive) {
           waiter.delta_stat(SNOOP_EVICT_DELAY, (double)(tick - waiter.arrive));
@@ -274,7 +292,7 @@ private:
         if (way_i != -1) {
           Logger::debug() << name() << ": DRAM rsp pkt " << pkt.id << " hit ["
                           << set_i << ":" << way_i << "]" << std::endl;
-          update(pkt.addr, set_i, way_i, pkt.dst, EXCLUSIVE, true, true);
+          update(pkt.addr, set_i, way_i, pkt.dst, EXCLUSIVE, true, false);
           if (waiting[set_i].size() > 0) {
             // Try an eviction.
             Logger::debug() << " try evict [" << set_i << "]" << std::endl;
@@ -319,7 +337,7 @@ public:
     for (auto &pair : host_trig_conflict_count) {
       auto &host = pair.first;
       auto &count = pair.second;
-      os << " - host " << host << " conflict count: " << count << std::endl;
+      os << " * host " << host << " conflict count: " << count << std::endl;
     }
     double avg_burst_inv = 0;
     double total_burst_inv = 0;
@@ -330,7 +348,22 @@ public:
       total_burst_inv += count;
     }
     avg_burst_inv /= total_burst_inv;
-    os << " - average burst invalidation size: " << avg_burst_inv << std::endl;
+    os << " * average burst invalidation size: " << avg_burst_inv << std::endl;
+
+    size_t evict_count_pdf[11] = {0}; // x[i] means count >= 2^i and < 2^(i+1)
+    for (auto &pair : evict_count) {
+      auto &count = pair.second;
+      size_t i = 0;
+      while (count >= ((size_t)1 << i) && i < 10) {
+        i += 1;
+      }
+      evict_count_pdf[i] += 1;
+    }
+    os << " * Evict count distribution: " << std::endl;
+    for (size_t i = 0; i < 11; ++i) {
+      os << "   - [" << (1 << i) << ", " << (1 << (i + 1))
+         << "): " << evict_count_pdf[i] << std::endl;
+    }
   }
 
   // TODO: TEMP
@@ -378,17 +411,6 @@ public:
         }
         queues[set_i].push_front(way_i);
       }
-    }
-
-    void on_update(Addr addr, size_t set_i, size_t way_i) override {
-      auto &q = queues[set_i];
-      for (auto it = q.begin(); it != q.end(); ++it) {
-        if (*it == way_i) {
-          q.erase(it);
-          break;
-        }
-      }
-      q.push_front(way_i);
     }
 
     ssize_t find_victim(size_t set_i, bool do_evict) override {
@@ -451,6 +473,17 @@ public:
       }
       queues[set_i].push_front(way_i);
     }
+
+    void on_update(Addr addr, size_t set_i, size_t way_i) override {
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (*it == way_i) {
+          q.erase(it);
+          break;
+        }
+      }
+      q.push_front(way_i);
+    }
   };
 
   class MRU : public LRU {
@@ -467,41 +500,91 @@ public:
     }
   };
 
-  class Random : public SnoopEviction {
+  class LFI : public SnoopEviction {
   protected:
-    std::vector<std::unordered_set<size_t>> queues;
-    size_t seed = 19260817;
+    struct Entry {
+      Addr addr;
+      size_t way_i;
+    };
+    std::vector<std::list<Entry>> queues;
+    std::unordered_map<Addr, size_t> insert_cnt;
 
   public:
-    Random() : SnoopEviction() {}
+    LFI() : SnoopEviction() {}
 
     void init(size_t size, size_t assoc) override {
       SnoopEviction::init(size, assoc);
-      queues.resize(setn, std::unordered_set<size_t>{});
+      queues.resize(setn, std::list<Entry>{});
     }
 
     void on_invalidate(Addr addr, size_t set_i, size_t way_i) override {
-      queues[set_i].erase(way_i * seed);
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (it->way_i == way_i) {
+          q.erase(it);
+          return;
+        }
+      }
     }
 
     void on_insert(Addr addr, size_t set_i, size_t way_i) override {
-      way_i *= seed;
-      if (queues[set_i].find(way_i) == queues[set_i].end()) {
-        if (queues[set_i].size() == assoc) {
-          auto it = queues[set_i].begin();
-          queues[set_i].erase(it);
-        }
-        queues[set_i].insert(way_i);
+      if (insert_cnt.find(addr) == insert_cnt.end()) {
+        insert_cnt[addr] = 0;
       }
+      insert_cnt[addr] += 1;
+      bool exist = false;
+      for (auto &e : queues[set_i]) {
+        if (e.way_i == way_i) {
+          exist = true;
+          break;
+        }
+      }
+      if (!exist) {
+        if (queues[set_i].size() == assoc) {
+          queues[set_i].pop_back();
+        }
+        queues[set_i].push_front({addr, way_i});
+      }
+    }
+
+    void on_update(Addr addr, size_t set_i, size_t way_i) override {
+      if (insert_cnt.find(addr) == insert_cnt.end()) {
+        insert_cnt[addr] = 0;
+      }
+      insert_cnt[addr] += 1;
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (it->way_i == way_i) {
+          q.erase(it);
+          break;
+        }
+      }
+      q.push_front({addr, way_i});
     }
 
     ssize_t find_victim(size_t set_i, bool do_evict) override {
       if (queues[set_i].empty())
         return -1;
-      auto it = queues[set_i].begin();
-      auto victim = *it;
-      if (do_evict)
-        queues[set_i].erase(it);
+      size_t ecnt = INT_MAX;
+      size_t victim = -1;
+      for (auto &e : queues[set_i]) {
+        size_t k = 0;
+        if (insert_cnt.find(e.addr) != insert_cnt.end())
+          k = insert_cnt[e.addr];
+        if (k < ecnt) {
+          ecnt = k;
+          victim = e.way_i;
+        }
+      }
+      if (do_evict) {
+        auto &q = queues[set_i];
+        for (auto it = q.begin(); it != q.end(); ++it) {
+          if (it->way_i == victim) {
+            q.erase(it);
+            break;
+          }
+        }
+      }
       return victim;
     }
   };

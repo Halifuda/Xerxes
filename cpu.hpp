@@ -4,7 +4,9 @@
 #include "device.hpp"
 #include "utils.hpp"
 
+#include <cmath>
 #include <iomanip>
+#include <list>
 #include <random>
 #include <set>
 
@@ -12,6 +14,35 @@ namespace xerxes {
 
 class Host : public Device {
 private:
+  class FakeLRUCache {
+    std::list<Addr> cache;
+    size_t capacity;
+
+  public:
+    Tick delay;
+    FakeLRUCache(size_t capacity, Tick delay)
+        : capacity(capacity), delay(delay) {}
+    void insert(Addr addr) {
+      if (cache.size() >= capacity)
+        cache.pop_front();
+      cache.push_back(addr);
+    }
+    bool hit(Addr addr) {
+      auto it = std::find(cache.begin(), cache.end(), addr);
+      if (it != cache.end()) {
+        cache.erase(it);
+        cache.push_back(addr);
+        return true;
+      }
+      return false;
+    }
+    void invalidate(Addr addr) {
+      auto it = std::find(cache.begin(), cache.end(), addr);
+      if (it != cache.end())
+        cache.erase(it);
+    }
+  };
+
   class Interleaving {
   public:
     struct EndPoint {
@@ -24,13 +55,15 @@ private:
     std::vector<EndPoint> end_points;
     std::random_device rd;
     std::ranlux48 gen;
-    std::uniform_real_distribution<> dis;
+    // std::uniform_real_distribution<> dis;
+    std::normal_distribution<> dis;
     size_t cur = 0;
     size_t block_size;
 
   public:
     Interleaving(size_t block_size = 64) : block_size(block_size) {
-      dis = std::uniform_real_distribution<>(0, 1);
+      // dis = std::uniform_real_distribution<>(0, 1);
+      dis = std::normal_distribution<>(0.5, 0.5);
     }
     size_t size() { return end_points.size(); }
     void push_back(EndPoint ep) {
@@ -41,10 +74,12 @@ private:
       auto id = end_points[cur].id;
       Addr addr = 0;
       if (end_points[cur].is_random) {
-        addr = Addr(floor(double(end_points[cur].capacity) / block_size *
-                          dis(gen))) *
-                   block_size +
-               end_points[cur].start;
+        auto seed = fmax(0, dis(gen));
+        seed = fmin(seed, 1);
+        addr =
+            Addr(floor(double(end_points[cur].capacity) / block_size * seed)) *
+                block_size +
+            end_points[cur].start;
       } else {
         addr = end_points[cur].cur;
         end_points[cur].cur += block_size;
@@ -77,7 +112,7 @@ private:
 
   Interleaving end_points;
   IssueQueue q;
-  Tick snoop_time;
+  FakeLRUCache cache;
   Tick cur = 0;
   Tick last_arrive = 0;
   size_t count;
@@ -89,11 +124,12 @@ private:
   std::unordered_map<TopoID, std::unordered_map<std::string, double>> stats;
 
 public:
-  Host(Topology *topology, size_t q_capacity, Tick snoop_time, size_t count,
-       Tick delay, size_t burst_size = 1, std::string name = "Host")
-      : Device(topology, name), q(q_capacity), snoop_time(snoop_time),
-        count(count), delay(delay), burst_size(burst_size),
-        block_size(burst_size * 64) {}
+  Host(Topology *topology, size_t q_capacity, size_t cache_capacity,
+       Tick cache_delay, size_t count, Tick delay, size_t burst_size = 1,
+       std::string name = "Host")
+      : Device(topology, name), q(q_capacity),
+        cache(cache_capacity, cache_delay), count(count), delay(delay),
+        burst_size(burst_size), block_size(burst_size * 64) {}
 
   Host &add_end_point(TopoID id, Addr start, size_t capacity, bool is_random) {
     end_points.push_back({id, start, capacity, is_random});
@@ -101,12 +137,14 @@ public:
     stats[id]["Count"] = 0;
     stats[id]["Bandwidth"] = 0;
     stats[id]["Average latency"] = 0;
+    stats[-1]["Cache evict count"] = 0;
+    stats[-1]["Cache hit count"] = 0;
     // stats[id]["Average switch queuing"] = 0;
     // stats[id]["Average switch time"] = 0;
     // stats[id]["Average wait for evict"] = 0;
     // stats[-1]["Invalidation count"] = 0;
     // stats[id]["Average wait on switch"] = 0;
-    stats[id]["Average wait on bus"] = 0;
+    // stats[id]["Average wait on bus"] = 0;
     // stats[id]["Average wait for packaging"] = 0;
     // stats[id]["Average wait burst"] = 0;
     return *this;
@@ -120,21 +158,23 @@ public:
         Logger::debug() << name() << " receive packet " << pkt.id
                         << ", issue queue is full? " << q.full() << std::endl;
         last_arrive = pkt.arrive;
+        cache.insert(pkt.addr);
 
         // Update stats
         stats[pkt.src]["Count"] += 1;
         stats[pkt.src]["Bandwidth"] += pkt.burst * 64;
         stats[pkt.src]["Average latency"] += pkt.arrive - pkt.sent;
-        stats[pkt.src]["Average wait on bus"] += pkt.get_stat(BUS_QUEUE_DELAY);
 
         q.pop(pkt);
         pkt.log_stat();
       } else if (pkt.type == INV) {
+        cache.invalidate(pkt.addr);
+        stats[-1]["Cache evict count"] += 1;
         std::swap(pkt.src, pkt.dst);
         pkt.is_rsp = true;
         pkt.payload = block_size * pkt.burst;
-        pkt.arrive += snoop_time;
-        pkt.delta_stat(NormalStatType::HOST_INV_DELAY, snoop_time);
+        pkt.arrive += cache.delay; // TODO: one or each?
+        pkt.delta_stat(NormalStatType::HOST_INV_DELAY, cache.delay);
         send_pkt(pkt);
       }
       return;
@@ -148,35 +188,33 @@ public:
     double agg_bw = 0;
     double agg_cnt = 0;
     double agg_lat = 0;
-    double agg_q = 0;
     os << std::fixed << std::setprecision(4);
     for (auto &pair : stats) {
       if (pair.first == -1)
         continue;
       os << pair.first << ","
          << pair.second["Bandwidth"] / (double)(last_arrive) << ","
-         << pair.second["Average latency"] / pair.second["Count"] << ","
-         << pair.second["Average wait on bus"] / pair.second["Count"]
-         << std::endl;
+         << pair.second["Average latency"] / pair.second["Count"] << std::endl;
 
       agg_cnt += pair.second["Count"];
       agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
       agg_lat += pair.second["Average latency"];
-      agg_q += pair.second["Average wait on bus"];
     }
     os << "Aggregate," << agg_bw << "," << agg_lat / agg_cnt << ","
-       << agg_q / agg_cnt << std::endl;
+       << std::endl;
+    os << "#Evict"
+       << "," << stats[-1]["Cache evict count"] << std::endl;
     return agg_bw;
   }
 
   void log_stats(std::ostream &os) override {
     os << name() << " stats: " << std::endl;
     os << " * Issued packets: " << cur_cnt << std::endl;
+    os << " * Evict count: " << stats[-1]["Cache evict count"] << std::endl;
+    os << " * Hit count: " << stats[-1]["Cache hit count"] << std::endl;
     double agg_bw = 0;
     double agg_cnt = 0;
     double agg_lat = 0;
-    double agg_q = 0;
-    double agg_sw = 0;
     for (auto &pair : stats) {
       if (pair.first == -1)
         continue;
@@ -190,22 +228,10 @@ public:
       os << "   - Average latency (ps): "
          << pair.second["Average latency"] / pair.second["Count"] << std::endl;
       agg_lat += pair.second["Average latency"];
-
-      os << "   - Average switch queuing (ps): "
-         << pair.second["Average switch queuing"] / pair.second["Count"]
-         << std::endl;
-      agg_q += pair.second["Average switch queuing"];
-
-      os << "   - Average switch time (ps): "
-         << pair.second["Average switch time"] / pair.second["Count"]
-         << std::endl;
-      agg_sw += pair.second["Average switch time"];
     }
     os << " * Aggregate: " << std::endl;
     os << "   - Bandwidth (GB/s): " << agg_bw << std::endl;
     os << "   - Average latency (ps): " << agg_lat / agg_cnt << std::endl;
-    os << "   - Average switch queuing (ps): " << agg_q / agg_cnt << std::endl;
-    os << "   - Average switch time (ps): " << agg_sw / agg_cnt << std::endl;
   }
 
   bool step(PacketType type) {
@@ -219,6 +245,14 @@ public:
       auto ep = pair.first;
       auto addr = pair.second;
       cur += delay;
+      if (cache.hit(addr)) {
+        stats[ep]["Count"] += 1;
+        stats[ep]["Bandwidth"] += burst_size * 64;
+        stats[ep]["Average latency"] += cache.delay;
+        stats[-1]["Cache hit count"] += 1;
+        cur += cache.delay;
+        return true;
+      }
       auto pkt =
           PktBuilder()
               .src(self)

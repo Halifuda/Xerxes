@@ -2,4 +2,10 @@
 
 cmake --build build --target Xerxes
 
-build/Xerxes
+# el=("LIFO" "LFI")
+# el=("baseline")
+el=("FIFO" "LIFO" "MRU" "LRU" "LFI")
+for i in "${el[@]}"
+do
+    ./build/Xerxes $i
+done
