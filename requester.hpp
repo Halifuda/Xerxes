@@ -4,6 +4,7 @@
 #include "device.hpp"
 #include "utils.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -199,8 +200,7 @@ public:
     }
     os << "Aggregate," << agg_bw << "," << agg_lat / agg_cnt << ","
        << std::endl;
-    os << "#Evict"
-       << "," << stats[-1]["Cache evict count"] << std::endl;
+    os << "#Evict" << "," << stats[-1]["Cache evict count"] << std::endl;
     return agg_bw;
   }
 
@@ -310,6 +310,7 @@ public:
       trace_file >> std::hex >> addr >> op >> std::dec >> tick;
       bool is_write = write_types.count(op) == 1;
       auto ep = end_points[cur].id;
+      addr = (addr % end_points[cur].capacity) + end_points[cur].start;
       cur = (cur + 1) % end_points.size();
       return {ep, addr, tick, is_write};
     }
