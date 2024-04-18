@@ -83,12 +83,12 @@ void epoch(EpochConfig &config) {
   auto host_cnt = config.memcnt;
 
   // Make devices.
-  std::vector<xerxes::Host *> hosts = {};
+  std::vector<xerxes::Requester *> hosts = {};
   std::vector<xerxes::DRAMsim3Interface *> mems = {};
   for (int i = 0; i < host_cnt; ++i) {
-    hosts.push_back(new xerxes::Host{sim.topology(), config.hostq, 128,
-                                     config.host_inv_time, config.cnt,
-                                     config.hostd, config.burst});
+    hosts.push_back(new xerxes::Requester{
+        sim.topology(), config.hostq, 128, config.host_inv_time, config.cnt,
+        config.hostd, config.burst, new xerxes::Requester::Random{}});
   }
   for (int i = 0; i < config.memcnt; ++i) {
     mems.push_back(new xerxes::DRAMsim3Interface{sim.topology(), config.clock,
@@ -244,23 +244,12 @@ void epoch(EpochConfig &config) {
   // Add end points to the host.
   for (int i = 0; i < host_cnt; ++i) {
     for (int j = 0; j < config.memcnt; ++j) {
-      hosts[i]->add_end_point(mems[j]->id(), 0, config.capa, config.random);
+      hosts[i]->add_end_point(mems[j]->id(), 0, config.capa, config.ratio);
     }
   }
 
   auto &notifier = *xerxes::Notifier::glb();
   std::vector<size_t> issue_cnts = std::vector<size_t>(config.memcnt, 0);
-  auto ratio = config.ratio;
-  auto type = [&](int issue_cnt) {
-    if (ratio == 0) {
-      return xerxes::PacketType::RD;
-    } else if (ratio == -1) {
-      return xerxes::PacketType::WT;
-    } else {
-      return issue_cnt % (ratio + 1) == ratio ? xerxes::PacketType::WT
-                                              : xerxes::PacketType::RD;
-    }
-  };
 
   size_t first_host = 0;
   size_t force_stop = 0;
@@ -285,7 +274,7 @@ void epoch(EpochConfig &config) {
       for (int i = 0; i < host_cnt; ++i) {
         auto h = (i + first_host) % host_cnt;
         if (res[h]) {
-          res[h] = hosts[h]->step(type(issue_cnts[h]));
+          res[h] = hosts[h]->step(false);
           issue_cnts[h] += (int)(res[h]);
         }
         if (!res[h]) {

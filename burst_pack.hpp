@@ -5,7 +5,7 @@
 #include <unordered_set>
 
 namespace xerxes {
-class Packaging : public Device {
+class Packing : public Device {
 private:
   struct Package {
     size_t pkg_id;
@@ -18,8 +18,8 @@ private:
   size_t cur_pkg_id = 0;
 
 public:
-  Packaging(Topology *topology, size_t packaging_num,
-            std::string name = "Packaging")
+  Packing(Topology *topology, size_t packaging_num,
+          std::string name = "Packaging")
       : Device(topology, name), packaging_num(packaging_num) {}
 
   void add_upstream(TopoID host) { upstreams.insert(host); }

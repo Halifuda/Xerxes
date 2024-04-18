@@ -75,7 +75,7 @@ private:
     auto &set = cache[set_i];
     for (ssize_t i = 0; i < (ssize_t)assoc; ++i) {
       auto &line = set[i];
-      if (line.valid && line.addr == addr && line.owner == owner) {
+      if (line.valid && line.addr == addr) {
         if (eviction)
           eviction->on_hit(addr, set_i, i);
         return i;
@@ -226,12 +226,18 @@ private:
       auto &line = cache[set_i][way_i];
       if (line.owner != pkt.src) {
         // Conflict. Need to evict the line.
-        auto peek = peek_burst_evict(line.addr, line.owner);
-        conduct_burst_evict(peek.first, peek.second, line.owner, pkt.arrive);
+        if (host_trig_conflict_count.find(pkt.src) ==
+            host_trig_conflict_count.end()) {
+          host_trig_conflict_count[pkt.src] = 0;
+        }
+        host_trig_conflict_count[pkt.src] += 1;
         // Insert the packet to waiting list.
         Logger::debug() << name() << ": pkt " << pkt.id << " conflict ["
                         << set_i << ":" << way_i << "]" << std::endl;
         waiting[set_i].insert(std::make_pair(pkt.id, pkt));
+        auto peek = peek_burst_evict(line.addr, line.owner);
+        conduct_burst_evict(peek.first, peek.second, line.owner, pkt.arrive);
+
       } else {
         // Hit. Directly send back (host should hold the data already).
         Logger::debug() << name() << ": pkt " << pkt.id << " hit at [" << set_i
@@ -333,36 +339,35 @@ public:
   }
 
   void log_stats(std::ostream &os) override {
-    os << name() << " stats:" << std::endl;
-    for (auto &pair : host_trig_conflict_count) {
-      auto &host = pair.first;
-      auto &count = pair.second;
-      os << " * host " << host << " conflict count: " << count << std::endl;
-    }
-    double avg_burst_inv = 0;
-    double total_burst_inv = 0;
-    for (auto &pair : burst_inv_size_count) {
-      auto &burst = pair.first;
-      auto &count = pair.second;
-      avg_burst_inv += burst * count;
-      total_burst_inv += count;
-    }
-    avg_burst_inv /= total_burst_inv;
-    os << " * average burst invalidation size: " << avg_burst_inv << std::endl;
+    // os << name() << " stats:" << std::endl;
+    // for (auto &pair : host_trig_conflict_count) {
+    //   auto &host = pair.first;
+    //   auto &count = pair.second;
+    //   os << " * host " << host << " conflict count: " << count << std::endl;
+    // }
+    // double avg_burst_inv = 0;
+    // double total_burst_inv = 0;
+    // for (auto &pair : burst_inv_size_count) {
+    //   auto &burst = pair.first;
+    //   auto &count = pair.second;
+    //   avg_burst_inv += burst * count;
+    //   total_burst_inv += count;
+    // }
+    // avg_burst_inv /= total_burst_inv;
+    // os << " * average burst invalidation size: " << avg_burst_inv <<
+    // std::endl;
 
-    size_t evict_count_pdf[11] = {0}; // x[i] means count >= 2^i and < 2^(i+1)
+    std::map<size_t, size_t> evict_count_pdf;
     for (auto &pair : evict_count) {
       auto &count = pair.second;
-      size_t i = 0;
-      while (count >= ((size_t)1 << i) && i < 10) {
-        i += 1;
+      if (evict_count_pdf.find(count) == evict_count_pdf.end()) {
+        evict_count_pdf[count] = 0;
       }
-      evict_count_pdf[i] += 1;
+      evict_count_pdf[count] += 1;
     }
-    os << " * Evict count distribution: " << std::endl;
-    for (size_t i = 0; i < 11; ++i) {
-      os << "   - [" << (1 << i) << ", " << (1 << (i + 1))
-         << "): " << evict_count_pdf[i] << std::endl;
+    // os << " * Evict count distribution: " << std::endl;
+    for (auto &pair : evict_count_pdf) {
+      os << pair.first << "," << pair.second << std::endl;
     }
   }
 
