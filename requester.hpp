@@ -53,14 +53,15 @@ public:
     }
 
     virtual Request next() = 0;
+    virtual bool eof() = 0;
   };
 
 private:
   class FakeLRUCache {
     std::list<Addr> cache;
-    size_t capacity;
 
   public:
+    size_t capacity;
     Tick delay;
     FakeLRUCache(size_t capacity, Tick delay)
         : capacity(capacity), delay(delay) {}
@@ -108,9 +109,9 @@ private:
   FakeLRUCache cache;
   Tick cur = 0;
   Tick last_arrive = 0;
-  size_t count;
   size_t cur_cnt = 0;
-  Tick delay;
+  Tick issue_delay;
+  bool coherent;
   size_t burst_size = 1;
   size_t block_size = 64;
 
@@ -118,11 +119,13 @@ private:
 
 public:
   Requester(Topology *topology, size_t q_capacity, size_t cache_capacity,
-            Tick cache_delay, size_t count, Tick delay, size_t burst_size = 1,
-            Interleaving *interleave = nullptr, std::string name = "Host")
+            Tick cache_delay, Tick issue_delay, bool coherent,
+            size_t burst_size = 1, Interleaving *interleave = nullptr,
+            std::string name = "Host")
       : Device(topology, name), end_points(interleave), q(q_capacity),
-        cache(cache_capacity, cache_delay), count(count), delay(delay),
-        burst_size(burst_size), block_size(burst_size * 64) {
+        cache(cache_capacity, cache_delay), issue_delay(issue_delay),
+        coherent(coherent), burst_size(burst_size),
+        block_size(burst_size * 64) {
     ASSERT(end_points != nullptr, "No interleave policy");
   }
 
@@ -163,6 +166,8 @@ public:
         stats[pkt.src]["Average wait for evict"] +=
             pkt.get_stat(SNOOP_EVICT_DELAY);
 
+        if (q.full())
+          register_issue_event(pkt.arrive);
         q.pop(pkt);
         pkt.log_stat();
       } else if (pkt.type == INV) {
@@ -179,29 +184,6 @@ public:
     }
     log_transit_normal(pkt);
     send_pkt(pkt);
-  }
-
-  double log_stats_csv(std::ostream &os) {
-    os << name() << " stats: " << std::endl;
-    double agg_bw = 0;
-    double agg_cnt = 0;
-    double agg_lat = 0;
-    os << std::fixed << std::setprecision(4);
-    for (auto &pair : stats) {
-      if (pair.first == -1)
-        continue;
-      os << pair.first << ","
-         << pair.second["Bandwidth"] / (double)(last_arrive) << ","
-         << pair.second["Average latency"] / pair.second["Count"] << std::endl;
-
-      agg_cnt += pair.second["Count"];
-      agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
-      agg_lat += pair.second["Average latency"];
-    }
-    os << "Aggregate," << agg_bw << "," << agg_lat / agg_cnt << ","
-       << std::endl;
-    os << "#Evict" << "," << stats[-1]["Cache evict count"] << std::endl;
-    return agg_bw;
   }
 
   void log_stats(std::ostream &os) override {
@@ -240,7 +222,7 @@ public:
   }
 
   bool step(bool coherent) {
-    if (cur_cnt < count) {
+    if (!end_points->eof()) {
       if (q.full()) {
         if (cur < last_arrive)
           cur = last_arrive;
@@ -249,7 +231,8 @@ public:
       auto req = end_points->next();
       auto ep = req.id;
       auto addr = req.addr;
-      cur += delay;
+      cur += issue_delay;
+      // TODO: Strict to trace?
       if (req.tick != 0)
         cur = req.tick;
       if (cache.hit(addr)) {
@@ -283,8 +266,21 @@ public:
     return false;
   }
 
-  bool all_issued() { return cur_cnt == count; }
+  void issue_event() {
+    if (step(coherent)) {
+      register_issue_event(cur);
+    }
+  }
+
+  void register_issue_event(Tick tick) {
+    auto &engine = *EventEngine::glb();
+    engine.add(tick, [this](void *) { issue_event(); }, nullptr);
+  }
+
+  bool all_issued() { return end_points->eof(); }
   bool q_empty() { return q.empty(); }
+
+  /* ------------------------------ Access Type ----------------------------- */
 
   class Trace : public Interleaving {
   private:
@@ -300,6 +296,7 @@ public:
         exit(1);
       }
     }
+    bool eof() { return trace_file.eof(); }
     Request next() {
       std::unordered_set<std::string> write_types = {"WRITE", "write",
                                                      "P_MEM_WR", "BOFF"};
@@ -307,6 +304,7 @@ public:
       Addr addr;
       Tick tick;
       std::string op;
+      // TODO: flexible trace decoding
       trace_file >> std::hex >> addr >> op >> std::dec >> tick;
       bool is_write = write_types.count(op) == 1;
       auto ep = end_points[cur].id;
@@ -317,8 +315,13 @@ public:
   };
 
   class Stream : public Interleaving {
+    size_t total_count;
+    size_t cur_count = 0;
+
   public:
-    Stream(size_t block_size = 64) : Interleaving(block_size) {}
+    Stream(size_t total_count, size_t block_size = 64)
+        : Interleaving(block_size), total_count(total_count) {}
+    bool eof() { return cur_count == total_count; }
     Request next() {
       auto ep = end_points[cur].id;
       auto addr = end_points[cur].cur;
@@ -328,18 +331,22 @@ public:
         end_points[cur].cur = end_points[cur].start;
       bool is_write = uni(gen) < end_points[cur].ratio;
       cur = (cur + 1) % end_points.size();
+      cur_count++;
       return {ep, addr, 0, is_write};
     }
   };
 
   class Random : public Interleaving {
-  private:
+    size_t total_count;
+    size_t cur_count = 0;
     std::normal_distribution<> norm;
 
   public:
-    Random(size_t block_size = 64) : Interleaving(block_size) {
+    Random(size_t total_count, size_t block_size = 64)
+        : Interleaving(block_size), total_count(total_count) {
       norm = std::normal_distribution<>(0.5, 0.5);
     }
+    bool eof() { return cur_count == total_count; }
     Request next() {
       auto ep = end_points[cur].id;
       auto seed = fmax(0, norm(gen));
@@ -350,8 +357,71 @@ public:
           end_points[cur].start;
       bool is_write = uni(gen) < end_points[cur].ratio;
       cur = (cur + 1) % end_points.size();
+      cur_count++;
       return {ep, addr, 0, is_write};
     }
   };
 };
+
+class RequesterBuilder {
+private:
+  Topology *topology_i;
+  size_t q_capacity_i;
+  size_t cache_capacity_i;
+  Tick cache_delay_i;
+  Tick issue_delay_i;
+  bool coherent_i;
+  size_t burst_size_i;
+  Requester::Interleaving *interleave_i;
+  std::string name_i;
+
+public:
+  RequesterBuilder()
+      : topology_i(nullptr), q_capacity_i(0), cache_capacity_i(0),
+        cache_delay_i(0), issue_delay_i(0), coherent_i(false), burst_size_i(1),
+        interleave_i(nullptr), name_i("Host") {}
+
+  RequesterBuilder &topology(Topology *topology) {
+    this->topology_i = topology;
+    return *this;
+  }
+  RequesterBuilder &q_capacity(size_t q_capacity) {
+    this->q_capacity_i = q_capacity;
+    return *this;
+  }
+  RequesterBuilder &cache_capacity(size_t cache_capacity) {
+    this->cache_capacity_i = cache_capacity;
+    return *this;
+  }
+  RequesterBuilder &cache_delay(Tick cache_delay) {
+    this->cache_delay_i = cache_delay;
+    return *this;
+  }
+  RequesterBuilder &issue_delay(Tick issue_delay) {
+    this->issue_delay_i = issue_delay;
+    return *this;
+  }
+  RequesterBuilder &coherent(bool coherent) {
+    this->coherent_i = coherent;
+    return *this;
+  }
+  RequesterBuilder &burst_size(size_t burst_size) {
+    this->burst_size_i = burst_size;
+    return *this;
+  }
+  RequesterBuilder &interleave(Requester::Interleaving *interleave) {
+    this->interleave_i = interleave;
+    return *this;
+  }
+  RequesterBuilder &name(std::string name) {
+    this->name_i = name;
+    return *this;
+  }
+  Requester build() {
+    return Requester(topology_i, q_capacity_i, cache_capacity_i, cache_delay_i,
+                     issue_delay_i, coherent_i, burst_size_i, interleave_i,
+                     name_i);
+  }
+};
+
 } // namespace xerxes

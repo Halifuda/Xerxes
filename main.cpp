@@ -9,8 +9,16 @@ int main() {
   // Make simulation skeleton.
   auto sim = xerxes::Simulation{};
   // Make devices.
-  auto requester = xerxes::Requester{
-      sim.topology(), 20, 128, 12, 600, 10, 1, new xerxes::Requester::Stream{}};
+  auto requester = xerxes::RequesterBuilder{}
+                       .topology(sim.topology())
+                       .issue_delay(5)
+                       .burst_size(1)
+                       .q_capacity(10)
+                       .cache_capacity(128)
+                       .cache_delay(12)
+                       .coherent(false)
+                       .interleave(new xerxes::Requester::Stream{120})
+                       .build();
   auto bus = xerxes::DuplexBus{sim.topology(), true, 0, 1, 256 * 8, 10, 256};
   auto mem = xerxes::DRAMsim3Interface{sim.topology(),    1,       40, 0,
                                        "output/dram.ini", "output"};
@@ -48,25 +56,25 @@ int main() {
   // Run the simulation.
   std::cout << "Start simulation." << std::endl;
   auto &engine = *xerxes::EventEngine::glb();
+  requester.register_issue_event(0);
   auto clock_cnt = 0;
-  while (true && clock_cnt < 100000 /* Max */) {
+  while (true && clock_cnt < 1000000 /* Max */) {
     if (requester.all_issued()) {
       break;
     }
-    bool res = true;
-    while (res) {
-      res = requester.step(false);
-    }
-    engine.step();
-    for (int i = 0; i < 10 /* clock granularity */; ++i) {
-      mem.clock();
+    auto curt = engine.step();
+    // TODO: automate clock align.
+    xerxes::Tick memt = 0;
+    for (int i = 0; i < 10 /* clock granularity */ && memt < curt; ++i) {
+      memt = mem.clock();
       clock_cnt++;
     }
   }
-  while (clock_cnt < 100000 /* Max */) {
-    engine.step();
-    for (int i = 0; i < 10 /* clock granularity */; ++i) {
-      mem.clock();
+  while (clock_cnt < 1000000 /* Max */) {
+    auto curt = engine.step();
+    xerxes::Tick memt = 0;
+    for (int i = 0; i < 10 /* clock granularity */ && memt < curt; ++i) {
+      memt = mem.clock();
       clock_cnt++;
     }
     if (requester.q_empty()) {
