@@ -4,6 +4,6 @@
 #include "utils.hpp"
 
 namespace xerxes {
-void global_init(NotifierFunc f, std::ostream &os, LogLevel level,
+void global_init(EventFunc f, std::ostream &os, LogLevel level,
                  Packet::LoggerFunc pkt_logger);
 }

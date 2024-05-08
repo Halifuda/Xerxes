@@ -184,8 +184,8 @@ struct Packet {
       stats.insert(std::make_pair(key, value));
   }
   typedef std::function<void(const Packet &)> LoggerFunc;
-  static LoggerFunc &pkt_logger(
-      bool set = false, LoggerFunc logger = [](const Packet &) {}) {
+  static LoggerFunc &
+  pkt_logger(bool set = false, LoggerFunc logger = [](const Packet &) {}) {
     static LoggerFunc f = [](const Packet &) {};
     if (set)
       f = logger;
@@ -269,36 +269,38 @@ public:
   }
 };
 
-typedef std::function<void(void *)> NotifierFunc;
+typedef std::function<void(void *)> EventFunc;
 
-class Notifier {
-  std::multimap<uint64_t, void *> notifiers;
-  NotifierFunc func;
+class EventEngine {
+  std::multimap<uint64_t, std::pair<EventFunc, void *>> events;
+  EventFunc func;
 
 public:
-  Notifier(NotifierFunc f = [](void *) {}) : func(f) {}
+  EventEngine(EventFunc f = [](void *) {}) : func(f) {}
 
-  static Notifier *glb(Notifier *n = nullptr) {
-    static Notifier *notifier = nullptr;
+  static EventEngine *glb(EventEngine *n = nullptr) {
+    static EventEngine *engine = nullptr;
     if (n != nullptr)
-      notifier = n;
-    return notifier;
+      engine = n;
+    return engine;
   }
 
-  void set(NotifierFunc f) { func = f; }
+  void set_default(EventFunc f) { func = f; }
+  EventFunc get_default() { return func; }
 
-  void add(uint64_t tick, void *ptr) {
-    notifiers.insert(std::make_pair(tick, ptr));
+  void add(uint64_t tick, EventFunc f, void *ptr) {
+    events.insert(std::make_pair(tick, std::make_pair(f, ptr)));
   }
+  void add_default(uint64_t tick, void *ptr) { add(tick, func, ptr); }
 
   uint64_t step() {
-    if (!notifiers.empty()) {
-      auto tick = notifiers.begin()->first;
-      Logger::warn() << "Notifier step at " << tick << std::endl;
-      auto data = notifiers.begin()->second;
-      notifiers.erase(notifiers.begin());
-      func(data);
-      return notifiers.size();
+    if (!events.empty()) {
+      auto tick = events.begin()->first;
+      Logger::warn() << "Event step at " << tick << std::endl;
+      auto pair = events.begin()->second;
+      events.erase(events.begin());
+      pair.first(pair.second);
+      return events.size();
     }
     return 0;
   }
