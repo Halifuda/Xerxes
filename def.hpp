@@ -269,42 +269,11 @@ public:
   }
 };
 
-typedef std::function<void(void *)> EventFunc;
-
-class EventEngine {
-  std::multimap<uint64_t, std::pair<EventFunc, void *>> events;
-  EventFunc func;
-
-public:
-  EventEngine(EventFunc f = [](void *) {}) : func(f) {}
-
-  static EventEngine *glb(EventEngine *n = nullptr) {
-    static EventEngine *engine = nullptr;
-    if (n != nullptr)
-      engine = n;
-    return engine;
-  }
-
-  void set_default(EventFunc f) { func = f; }
-  EventFunc get_default() { return func; }
-
-  void add(uint64_t tick, EventFunc f, void *ptr) {
-    events.insert(std::make_pair(tick, std::make_pair(f, ptr)));
-  }
-  void add_default(uint64_t tick, void *ptr) { add(tick, func, ptr); }
-
-  uint64_t step() {
-    if (!events.empty()) {
-      auto tick = events.begin()->first;
-      Logger::warn() << "Event step at " << tick << std::endl;
-      auto pair = events.begin()->second;
-      events.erase(events.begin());
-      pair.first(pair.second);
-      return events.size();
-    }
-    return 0;
-  }
-};
+typedef std::function<void()> EventFunc;
+void xerxes_schedule(EventFunc f, Tick tick);
+bool xerxes_events_empty();
+class Device;
+Device *find_dev(TopoID id);
 
 class Timeline {
 public:

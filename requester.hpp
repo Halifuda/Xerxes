@@ -94,6 +94,8 @@ private:
     IssueQueue(size_t capacity) : capacity(capacity) {}
     bool full() { return queue.size() >= capacity; }
     bool empty() { return queue.empty(); }
+    size_t size() { return queue.size(); }
+    size_t cap() { return capacity; }
     void push(const Packet &pkt) {
       if (full()) {
         Logger::warn() << "Queue is full!" << std::endl;
@@ -186,6 +188,29 @@ public:
     send_pkt(pkt);
   }
 
+  double get_agg_stat(std::string name) {
+    double sum = 0;
+    double cnt = 0;
+    if (name == "Bandwidth") {
+      for (auto &pair : stats) {
+        sum += pair.second[name] * 1000 / (double)(last_arrive);
+      }
+    } else if (name.find("Average") != std::string::npos) {
+      for (auto &pair : stats) {
+        sum += pair.second[name];
+        cnt += pair.second["Count"];
+      }
+      sum /= cnt;
+    } else if (name == "Cache hit count" || name == "Cache evict count") {
+      sum = stats[-1][name];
+    } else {
+      for (auto &pair : stats) {
+        sum += pair.second[name];
+      }
+    }
+    return sum;
+  }
+
   void log_stats(std::ostream &os) override {
     os << name() << " stats: " << std::endl;
     os << " * Issued packets: " << cur_cnt << std::endl;
@@ -222,6 +247,7 @@ public:
   }
 
   bool step(bool coherent) {
+    static bool ended = false;
     if (!end_points->eof()) {
       if (q.full()) {
         if (cur < last_arrive)
@@ -240,6 +266,9 @@ public:
         stats[ep]["Bandwidth"] += burst_size * 64;
         stats[ep]["Average latency"] += cache.delay;
         stats[-1]["Cache hit count"] += 1;
+
+        Logger::info() << "Cache hit: " << addr << "," << cur << ","
+                       << cur + cache.delay << std::endl;
         cur += cache.delay;
         return true;
       }
@@ -262,6 +291,24 @@ public:
       send_pkt(pkt);
       cur_cnt++;
       return true;
+    } else {
+      if (!ended) {
+        ended = true;
+        for (auto &ep : end_points->end_points) {
+          auto pkt = PktBuilder()
+                         .src(self)
+                         .dst(ep.id)
+                         .addr(0)
+                         .sent(cur)
+                         .payload(0)
+                         .burst(0)
+                         .type(PacketType::NT_RD)
+                         .build();
+          q.push(pkt);
+          send_pkt(pkt);
+        }
+        return true;
+      }
     }
     return false;
   }
@@ -273,8 +320,7 @@ public:
   }
 
   void register_issue_event(Tick tick) {
-    auto &engine = *EventEngine::glb();
-    engine.add(tick, [this](void *) { issue_event(); }, nullptr);
+    xerxes_schedule([this]() { this->issue_event(); }, tick);
   }
 
   bool all_issued() { return end_points->eof(); }
@@ -283,12 +329,32 @@ public:
   /* ------------------------------ Access Type ----------------------------- */
 
   class Trace : public Interleaving {
+  public:
+    struct TraceReq {
+      Addr addr;
+      bool is_write;
+      Tick tick;
+    };
+
   private:
     std::ifstream trace_file;
+    std::function<TraceReq(std::ifstream &)> decoder;
 
   public:
-    Trace(std::string trace_file, size_t block_size = 64)
-        : Interleaving(block_size) {
+    Trace(
+        std::string trace_file,
+        std::function<TraceReq(std::ifstream &)> decoder =
+            [](std::ifstream &file) {
+              static std::unordered_set<std::string> write_types = {
+                  "W", "WR", "WRITE", "write", "P_MEM_WR", "BOFF"};
+              std::string type;
+              Addr addr;
+              Tick tick;
+              file >> std::hex >> addr >> std::dec >> type >> tick;
+              return TraceReq{addr, write_types.count(type) > 0, tick};
+            },
+        size_t block_size = 64)
+        : Interleaving(block_size), decoder(decoder) {
       this->trace_file.open(trace_file);
       if (!this->trace_file.is_open()) {
         Logger::error() << "Cannot open trace file: " << trace_file
@@ -298,19 +364,12 @@ public:
     }
     bool eof() { return trace_file.eof(); }
     Request next() {
-      std::unordered_set<std::string> write_types = {"WRITE", "write",
-                                                     "P_MEM_WR", "BOFF"};
-
-      Addr addr;
-      Tick tick;
-      std::string op;
       // TODO: flexible trace decoding
-      trace_file >> std::hex >> addr >> op >> std::dec >> tick;
-      bool is_write = write_types.count(op) == 1;
+      auto req = decoder(trace_file);
       auto ep = end_points[cur].id;
-      addr = (addr % end_points[cur].capacity) + end_points[cur].start;
+      req.addr = (req.addr % end_points[cur].capacity) + end_points[cur].start;
       cur = (cur + 1) % end_points.size();
-      return {ep, addr, tick, is_write};
+      return {ep, req.addr, req.tick, req.is_write};
     }
   };
 

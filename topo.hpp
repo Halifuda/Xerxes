@@ -28,9 +28,7 @@ public:
   }
 
   bool send(Packet pkt) {
-    auto tick = pkt.arrive;
     buffer.push_back(pkt);
-    EventEngine::glb()->add_default(tick, (void *)(this->self));
     return true;
   }
 

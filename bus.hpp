@@ -146,6 +146,8 @@ public:
     double cnt = 0;
     for (auto &from : routes) {
       for (auto &to : from.second) {
+        std::cout << to.second.occupy << " / " << to.second.last_occupy
+                  << std::endl;
         utils += (double)to.second.occupy / (double)to.second.last_occupy;
         cnt += 1;
       }

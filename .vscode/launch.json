@@ -1,0 +1,18 @@
+{
+    "configurations": [
+        {
+            "type": "by-gdb",
+            "request": "launch",
+            "name": "Launch(gdb)",
+            "program": "debug/Xerxes",
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "type": "by-gdb",
+            "request": "attach",
+            "name": "Attach(gdb)",
+            "program": "debug/Xerxes",
+            "cwd": "${workspaceRoot}"
+        }
+    ]
+}

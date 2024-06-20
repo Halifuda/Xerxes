@@ -17,9 +17,15 @@ protected:
       return;
     pkt.from = self;
     to->send(pkt);
+    auto a = find_dev(to->id());
+    a->sched_transit(pkt.arrive);
   }
 
   void send_pkt(Packet pkt) { send_pkt_to(pkt, pkt.dst); }
+
+  void sched_transit(Tick tick) {
+    xerxes_schedule([this]() { this->transit(); }, tick);
+  }
 
   Packet receive_pkt() {
     auto pkt = Packet{};
@@ -48,6 +54,9 @@ public:
 
   virtual void transit() {
     auto pkt = receive_pkt();
+    Logger::warn() << "!DEFAULLT TRANSIT! " << name() << " received packet "
+                   << pkt.id << " from " << pkt.from << " to " << pkt.dst
+                   << " at " << pkt.arrive << std::endl;
     if (pkt.dst == self) {
       return;
     }
