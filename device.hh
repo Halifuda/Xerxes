@@ -1,15 +1,21 @@
 #pragma once
+#ifndef XERXES_DEVICE_HH
+#define XERXES_DEVICE_HH
 
-#include "topo.hpp"
-
-#include <string>
+#include "def.hh"
+#include "simulation.hh"
+#include "system.hh"
+#include "topology.hh"
 
 namespace xerxes {
 class Device {
 protected:
+  Simulation *sim;
   Topology *topology;
   TopoID self;
   std::string name_;
+
+  void sched_transit(Tick tick);
 
   void send_pkt_to(Packet pkt, TopoID dst) {
     auto to = topology->next_node(self, dst);
@@ -17,15 +23,11 @@ protected:
       return;
     pkt.from = self;
     to->send(pkt);
-    auto a = find_dev(to->id());
+    auto a = sim->system()->find_dev(to->id());
     a->sched_transit(pkt.arrive);
   }
 
   void send_pkt(Packet pkt) { send_pkt_to(pkt, pkt.dst); }
-
-  void sched_transit(Tick tick) {
-    xerxes_schedule([this]() { this->transit(); }, tick);
-  }
 
   Packet receive_pkt() {
     auto pkt = Packet{};
@@ -45,8 +47,10 @@ protected:
   }
 
 public:
-  Device(Topology *topology, std::string name = "default_name")
-      : topology(topology), self(topology->new_node()), name_(name) {}
+  Device(Simulation *sim, std::string name = "default_name")
+      : sim(sim), self(sim->topology()->new_node()), name_(name) {
+    topology = sim->topology();
+  }
   virtual ~Device() {}
 
   std::string name() const { return name_ + "#" + std::to_string(self); }
@@ -66,3 +70,5 @@ public:
   virtual void log_stats(std::ostream &os) {}
 };
 } // namespace xerxes
+
+#endif // XERXES_DEVICE_HH

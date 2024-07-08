@@ -1,6 +1,8 @@
 #pragma once
-#include "def.hpp"
-#include "device.hpp"
+#ifndef XERXES_BURST_PACK_HH
+#define XERXES_BURST_PACK_HH
+
+#include "device.hh"
 
 #include <unordered_set>
 
@@ -18,9 +20,8 @@ private:
   size_t cur_pkg_id = 0;
 
 public:
-  Packing(Topology *topology, size_t packaging_num,
-          std::string name = "Packaging")
-      : Device(topology, name), packaging_num(packaging_num) {}
+  Packing(Simulation *sim, size_t packaging_num, std::string name = "Packaging")
+      : Device(sim, name), packaging_num(packaging_num) {}
 
   void add_upstream(TopoID host) { upstreams.insert(host); }
 
@@ -76,8 +77,8 @@ private:
   std::unordered_map<PktID, PktID> reverse;
 
 public:
-  BurstHandler(Topology *topology, std::string name = "BurstHandler")
-      : Device(topology, name) {}
+  BurstHandler(Simulation *sim, std::string name = "BurstHandler")
+      : Device(sim, name) {}
 
   void transit() override {
     auto pkt = receive_pkt();
@@ -148,3 +149,5 @@ public:
 };
 
 } // namespace xerxes
+
+#endif // XERXES_BURST_PACK_HH

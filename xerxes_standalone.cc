@@ -1,5 +1,6 @@
-#include "xerxes_core.hpp"
-#include "utils.hpp"
+#include "xerxes_standalone.hh"
+#include "device.hh"
+#include "utils.hh"
 
 namespace xerxes {
 Simulation *glb_sim = nullptr;
@@ -40,11 +41,13 @@ public:
   bool empty() { return events.empty(); }
 } glb_engine;
 
+void Device::sched_transit(Tick tick) {
+  glb_engine.add(tick, [this]() { this->transit(); });
+}
+
 void xerxes_schedule(EventFunc f, uint64_t tick) { glb_engine.add(tick, f); }
 
 bool xerxes_events_empty() { return glb_engine.empty(); }
-
-Device *find_dev(TopoID id) { return glb_sim->system()->find_dev(id); }
 
 Tick step() { return glb_engine.step(); }
 

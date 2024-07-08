@@ -1,6 +1,8 @@
 #pragma once
-#include "def.hpp"
-#include "device.hpp"
+#ifndef XERXES_BUS_HH
+#define XERXES_BUS_HH
+
+#include "device.hh"
 
 #include <algorithm>
 #include <map>
@@ -26,7 +28,7 @@ private:
 
   std::map<std::string, double> stats;
 
-  Tick reverse_time(TopoID from, TopoID to, Tick arrive) {
+  Tick reverse_time(TopoID from, TopoID to, Tick arrive, bool is_write) {
     if (is_full)
       return 0;
     auto &route = get_or_init_route(from, to);
@@ -39,6 +41,8 @@ private:
       direction.insert({arrive, it->second});
       it->second = direct;
       stats["Direction reverse count"] += 1;
+      if (is_write)
+        return half_rev_time * 2;
       return half_rev_time;
     }
     return 0;
@@ -60,10 +64,10 @@ private:
   }
 
 public:
-  DuplexBus(Topology *topology, bool is_full, Tick half_rev_time,
-            Tick delay_per_T, size_t width, Tick framing_time = 20,
-            size_t frame_size = 256, std::string name = "DuplexBus")
-      : Device(topology, name), is_full(is_full), half_rev_time(half_rev_time),
+  DuplexBus(Simulation *sim, bool is_full, Tick half_rev_time, Tick delay_per_T,
+            size_t width, Tick framing_time = 20, size_t frame_size = 256,
+            std::string name = "DuplexBus")
+      : Device(sim, name), is_full(is_full), half_rev_time(half_rev_time),
         delay_per_T(delay_per_T), width(width / 8),
         frame_size(frame_size), // width: bit -> byte
         framing_time(framing_time) {
@@ -92,7 +96,7 @@ public:
     size_t frame = (pkt.payload + frame_size) / frame_size;
     auto &route = get_or_init_route(pkt.from, to->id());
     auto delay = ((frame * frame_size + width - 1) / width) * delay_per_T;
-    auto rev = reverse_time(pkt.from, to->id(), pkt.arrive);
+    auto rev = reverse_time(pkt.from, to->id(), pkt.arrive, pkt.is_write());
     if (rev > 0) {
       auto finish_rev = route.timeline.transfer_time(pkt.arrive, rev);
       if (finish_rev > pkt.arrive)
@@ -162,3 +166,5 @@ public:
   }
 };
 } // namespace xerxes
+
+#endif // XERXES_BUS_HH

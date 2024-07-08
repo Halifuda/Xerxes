@@ -1,5 +1,8 @@
 #pragma once
-#include "utils.hpp"
+#ifndef XERXES_DEF_HH
+#define XERXES_DEF_HH
+
+#include "utils.hh"
 
 #include <climits>
 #include <cstddef>
@@ -14,6 +17,9 @@ typedef uint64_t Addr;
 typedef int64_t TopoID;
 typedef int64_t PktID;
 typedef uint64_t Tick;
+class Topology;
+class System;
+class Simulation;
 
 typedef enum {
   RD,     /* Read (coherent) */
@@ -320,3 +326,5 @@ public:
   }
 };
 } // namespace xerxes
+
+#endif // XERXES_DEF_HH

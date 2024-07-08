@@ -1,8 +1,10 @@
 #pragma once
+#ifndef XERXES_DRAMSIM3_INTERFACE_HH
+#define XERXES_DRAMSIM3_INTERFACE_HH
+
 #include "DRAMsim3/src/memory_system.h"
-#include "def.hpp"
-#include "device.hpp"
-#include "utils.hpp"
+#include "device.hh"
+#include "utils.hh"
 
 #include <list>
 #include <map>
@@ -51,12 +53,12 @@ private:
   }
 
 public:
-  DRAMsim3Interface(Topology *topology, const Tick tick_per_clock,
+  DRAMsim3Interface(Simulation *sim, const Tick tick_per_clock,
                     const Tick process_time, const Addr start,
                     const std::string &config_file,
                     const std::string &output_dir,
                     std::string name = "DRAMsim3Interface")
-      : Device(topology, name), start(start), tick_per_clock(tick_per_clock),
+      : Device(sim, name), start(start), tick_per_clock(tick_per_clock),
         process_time(process_time),
         memsys(config_file, output_dir,
                std::bind(&DRAMsim3Interface::callback, this,
@@ -143,3 +145,5 @@ public:
 };
 
 } // namespace xerxes
+
+#endif // XERXES_DRAMSIM3_INTERFACE_HH

@@ -1,4 +1,6 @@
 #pragma once
+#ifndef XERXES_UTILS_HH
+#define XERXES_UTILS_HH
 
 #include <iostream>
 
@@ -68,3 +70,5 @@ inline void __assert(bool cond, const std::string &msg, const std::string &file,
     __panic(msg, file, line);
 }
 } // namespace xerxes
+
+#endif // XERXES_UTILS_HH

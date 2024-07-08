@@ -1,12 +1,13 @@
 #pragma once
+#ifndef XERXES_TOPOLOGY_HH
+#define XERXES_TOPOLOGY_HH
 
-#include "def.hpp"
-#include "utils.hpp"
+#include "def.hh"
 
-#include <iostream>
 #include <list>
 #include <queue>
 #include <set>
+#include <vector>
 
 namespace xerxes {
 class TopoNode {
@@ -45,7 +46,7 @@ public:
 
 class Topology {
   std::vector<TopoNode> nodes;
-  std::vector<std::vector<TopoID>> router;
+  std::vector<std::vector<TopoID>> router; // next node in a->b
 
 public:
   TopoID new_node() {
@@ -126,3 +127,5 @@ public:
   }
 };
 } // namespace xerxes
+
+#endif // XERXES_TOPOLOGY_HH

@@ -1,7 +1,9 @@
 #pragma once
-#include "def.hpp"
-#include "device.hpp"
-#include "utils.hpp"
+#ifndef XERXES_SNOOP_HH
+#define XERXES_SNOOP_HH
+
+#include "device.hh"
+#include "utils.hh"
 
 #include <map>
 #include <utility>
@@ -313,10 +315,10 @@ private:
   }
 
 public:
-  Snoop(Topology *topology, size_t line_num, size_t assoc, size_t max_burst_inv,
+  Snoop(Simulation *sim, size_t line_num, size_t assoc, size_t max_burst_inv,
         SnoopEviction *eviction = nullptr, bool log_inv = false,
         std::string name = "Snoop")
-      : Device(topology, name), line_num(line_num), assoc(assoc),
+      : Device(sim, name), line_num(line_num), assoc(assoc),
         set_num(line_num / assoc), max_burst_inv(max_burst_inv),
         eviction(eviction), log_inv(log_inv) {
     ASSERT(line_num % assoc == 0, "snoop: size % assoc != 0");
@@ -596,3 +598,5 @@ public:
 };
 
 } // namespace xerxes
+
+#endif // XERXES_SNOOP_HH

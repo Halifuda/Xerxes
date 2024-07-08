@@ -1,13 +1,13 @@
 #pragma once
+#ifndef XERXES_REQUESTER_HH
+#define XERXES_REQUESTER_HH
 
-#include "def.hpp"
-#include "device.hpp"
-#include "utils.hpp"
+#include "device.hh"
+#include "utils.hh"
 
 #include <algorithm>
 #include <cmath>
 #include <fstream>
-#include <iomanip>
 #include <list>
 #include <random>
 #include <set>
@@ -120,11 +120,11 @@ private:
   std::unordered_map<TopoID, std::unordered_map<std::string, double>> stats;
 
 public:
-  Requester(Topology *topology, size_t q_capacity, size_t cache_capacity,
+  Requester(Simulation *sim, size_t q_capacity, size_t cache_capacity,
             Tick cache_delay, Tick issue_delay, bool coherent,
             size_t burst_size = 1, Interleaving *interleave = nullptr,
             std::string name = "Host")
-      : Device(topology, name), end_points(interleave), q(q_capacity),
+      : Device(sim, name), end_points(interleave), q(q_capacity),
         cache(cache_capacity, cache_delay), issue_delay(issue_delay),
         coherent(coherent), burst_size(burst_size),
         block_size(burst_size * 64) {
@@ -424,7 +424,7 @@ public:
 
 class RequesterBuilder {
 private:
-  Topology *topology_i;
+  Simulation *sim_i;
   size_t q_capacity_i;
   size_t cache_capacity_i;
   Tick cache_delay_i;
@@ -436,12 +436,12 @@ private:
 
 public:
   RequesterBuilder()
-      : topology_i(nullptr), q_capacity_i(0), cache_capacity_i(0),
-        cache_delay_i(0), issue_delay_i(0), coherent_i(false), burst_size_i(1),
+      : sim_i(nullptr), q_capacity_i(0), cache_capacity_i(0), cache_delay_i(0),
+        issue_delay_i(0), coherent_i(false), burst_size_i(1),
         interleave_i(nullptr), name_i("Host") {}
 
-  RequesterBuilder &topology(Topology *topology) {
-    this->topology_i = topology;
+  RequesterBuilder &simulation(Simulation *sim) {
+    this->sim_i = sim;
     return *this;
   }
   RequesterBuilder &q_capacity(size_t q_capacity) {
@@ -477,10 +477,12 @@ public:
     return *this;
   }
   Requester build() {
-    return Requester(topology_i, q_capacity_i, cache_capacity_i, cache_delay_i,
+    return Requester(sim_i, q_capacity_i, cache_capacity_i, cache_delay_i,
                      issue_delay_i, coherent_i, burst_size_i, interleave_i,
                      name_i);
   }
 };
 
 } // namespace xerxes
+
+#endif // XERXES_REQUESTER_HH
