@@ -5,50 +5,58 @@
 #include <iostream>
 
 namespace xerxes {
-enum LogLevel { NONE = 0, INFO = 1, TEMP = 2, DEBUG = 3, WARN = 4, ERROR = 5 };
+enum XerxesLogLevel {
+  NONE = 0,
+  INFO = 1,
+  TEMP = 2,
+  DEBUG = 3,
+  WARNING = 4,
+  ERROR = 5
+};
 
-class Logger {
+class XerxesLogger {
 private:
-  LogLevel glb_level;
-  LogLevel cur_level;
+  XerxesLogLevel glb_level;
+  XerxesLogLevel cur_level;
   std::ostream *stream;
 
-  Logger() : glb_level(NONE), cur_level(NONE), stream(&std::cout) {}
+  XerxesLogger() : glb_level(NONE), cur_level(NONE), stream(&std::cout) {}
 
 public:
-  template <typename T> Logger &operator<<(const T &t) {
+  template <typename T> XerxesLogger &operator<<(const T &t) {
     if (cur_level <= glb_level)
       *stream << t;
     return *this;
   }
 
-  Logger &operator<<(std::ostream &(*f)(std::ostream &)) {
+  XerxesLogger &operator<<(std::ostream &(*f)(std::ostream &)) {
     if (cur_level <= glb_level)
       *stream << f;
     return *this;
   }
 
-  Logger &operator<<(LogLevel l) {
+  XerxesLogger &operator<<(XerxesLogLevel l) {
     cur_level = l;
     return *this;
   }
-  static Logger &get_or_set(bool set = false, std::ostream &os = std::cout,
-                            LogLevel level = NONE) {
-    static Logger logger = Logger{};
+  static XerxesLogger &get_or_set(bool set = false,
+                                  std::ostream &os = std::cout,
+                                  XerxesLogLevel level = NONE) {
+    static XerxesLogger logger = XerxesLogger{};
     if (set) {
       logger.stream = &os;
       logger.glb_level = level;
     }
     return logger;
   }
-  static void set(std::ostream &os, LogLevel level = NONE) {
+  static void set(std::ostream &os, XerxesLogLevel level = NONE) {
     get_or_set(true, os, level);
   }
-  static Logger &info() { return get_or_set() << INFO; }
-  static Logger &temp() { return get_or_set() << TEMP; }
-  static Logger &debug() { return get_or_set() << DEBUG; }
-  static Logger &warn() { return get_or_set() << WARN; }
-  static Logger &error() { return get_or_set() << ERROR; }
+  static XerxesLogger &info() { return get_or_set() << INFO; }
+  static XerxesLogger &temp() { return get_or_set() << TEMP; }
+  static XerxesLogger &debug() { return get_or_set() << DEBUG; }
+  static XerxesLogger &warning() { return get_or_set() << WARNING; }
+  static XerxesLogger &error() { return get_or_set() << ERROR; }
 };
 
 #ifndef PANIC
@@ -59,8 +67,8 @@ public:
 #endif
 
 inline void __panic(const std::string &msg, const std::string &file, int line) {
-  Logger::info() << "Panic at " << file << ":" << line << " : " << msg
-                 << std::endl;
+  XerxesLogger::info() << "Panic at " << file << ":" << line << " : " << msg
+                       << std::endl;
   std::exit(-1);
 }
 

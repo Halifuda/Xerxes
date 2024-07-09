@@ -7,8 +7,8 @@
 #include "utils.hh"
 
 namespace xerxes {
-void global_init(Simulation *sim, std::ostream &os, LogLevel level,
-                 Packet::LoggerFunc pkt_logger);
+void global_init(Simulation *sim, std::ostream &os, XerxesLogLevel level,
+                 Packet::XerxesLoggerFunc pkt_logger);
 
 Tick step();
 bool events_empty();

@@ -72,8 +72,9 @@ public:
     auto pkt = receive_pkt();
     while (pkt.type != PacketType::PKT_TYPE_NUM) {
       if (pkt.dst == self) {
-        Logger::debug() << name() << " receive packet " << pkt.id << " from "
-                        << pkt.from << " at " << pkt.arrive << std::endl;
+        XerxesLogger::debug()
+            << name() << " receive packet " << pkt.id << " from " << pkt.from
+            << " at " << pkt.arrive << std::endl;
         pkt.delta_stat(DEVICE_PROCESS_TIME, (double)(process_time));
         pkt.arrive += process_time;
         pending.push_back(pkt);
@@ -90,8 +91,8 @@ public:
     if (it == issued.end())
       return;
     auto &pkt = it->second.front();
-    Logger::debug() << "Callback #" << pkt.id << "r at "
-                    << interface_clock * tick_per_clock << std::endl;
+    XerxesLogger::debug() << "Callback #" << pkt.id << "r at "
+                          << interface_clock * tick_per_clock << std::endl;
     std::swap(pkt.src, pkt.dst);
 
     // TODO: is the callback called at the exact tick?

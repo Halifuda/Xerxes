@@ -36,14 +36,14 @@ protected:
   }
 
   void show_all_pkt() {
-    Logger::debug() << name() << " has packets: ";
+    XerxesLogger::debug() << name() << " has packets: ";
     topology->get_node(self)->show_all_pkt();
   }
 
   void log_transit_normal(const Packet &pkt) {
-    Logger::debug() << name() << " transit packet " << pkt.id << " from "
-                    << pkt.from << " to " << pkt.dst << " at " << pkt.arrive
-                    << std::endl;
+    XerxesLogger::debug() << name() << " transit packet " << pkt.id << " from "
+                          << pkt.from << " to " << pkt.dst << " at "
+                          << pkt.arrive << std::endl;
   }
 
 public:
@@ -54,13 +54,14 @@ public:
   virtual ~Device() {}
 
   std::string name() const { return name_ + "#" + std::to_string(self); }
-  const TopoID id() const { return self; }
+  TopoID id() const { return self; }
 
   virtual void transit() {
     auto pkt = receive_pkt();
-    Logger::warn() << "!DEFAULLT TRANSIT! " << name() << " received packet "
-                   << pkt.id << " from " << pkt.from << " to " << pkt.dst
-                   << " at " << pkt.arrive << std::endl;
+    XerxesLogger::warning()
+        << "!DEFAULLT TRANSIT! " << name() << " received packet " << pkt.id
+        << " from " << pkt.from << " to " << pkt.dst << " at " << pkt.arrive
+        << std::endl;
     if (pkt.dst == self) {
       return;
     }

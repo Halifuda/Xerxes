@@ -5,10 +5,10 @@
 namespace xerxes {
 Simulation *glb_sim = nullptr;
 
-void global_init(Simulation *sim, std::ostream &os, LogLevel level,
-                 Packet::LoggerFunc pkt_logger) {
+void global_init(Simulation *sim, std::ostream &os, XerxesLogLevel level,
+                 Packet::XerxesLoggerFunc pkt_logger) {
   glb_sim = sim;
-  Logger::set(os, level);
+  XerxesLogger::set(os, level);
   Packet::pkt_logger(true, pkt_logger);
 }
 

@@ -35,8 +35,8 @@ public:
 
   void show_all_pkt() {
     for (auto &pkt : buffer)
-      Logger::debug() << pkt.id << " ";
-    Logger::debug() << std::endl;
+      XerxesLogger::debug() << pkt.id << " ";
+    XerxesLogger::debug() << std::endl;
   }
 
   const std::set<TopoID> &neighbors() { return neighbors_; }

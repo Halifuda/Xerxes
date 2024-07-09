@@ -108,9 +108,10 @@ public:
 
     pkt.delta_stat(BUS_QUEUE_DELAY, (double)(transfer_time - pkt.arrive));
     pkt.delta_stat(FRAMING_TIME, (double)framing_time);
-    Logger::debug() << "[BQD #" << pkt.id << (pkt.is_rsp ? 'r' : ' ')
-                    << "]: " << transfer_time << " - " << pkt.arrive << " = "
-                    << (double)(transfer_time - pkt.arrive) << std::endl;
+    XerxesLogger::debug() << "[BQD #" << pkt.id << (pkt.is_rsp ? 'r' : ' ')
+                          << "]: " << transfer_time << " - " << pkt.arrive
+                          << " = " << (double)(transfer_time - pkt.arrive)
+                          << std::endl;
     pkt.delta_stat(BUS_TIME, (double)delay);
 
     pkt.arrive = transfer_time + delay;

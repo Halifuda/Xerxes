@@ -98,7 +98,7 @@ private:
     size_t cap() { return capacity; }
     void push(const Packet &pkt) {
       if (full()) {
-        Logger::warn() << "Queue is full!" << std::endl;
+        XerxesLogger::warn() << "Queue is full!" << std::endl;
         return;
       }
       queue.insert(pkt.id);
@@ -156,8 +156,9 @@ public:
     if (pkt.dst == self) {
       // On receive
       if (pkt.is_rsp) {
-        Logger::debug() << name() << " receive packet " << pkt.id
-                        << ", issue queue is full? " << q.full() << std::endl;
+        XerxesLogger::debug()
+            << name() << " receive packet " << pkt.id
+            << ", issue queue is full? " << q.full() << std::endl;
         last_arrive = pkt.arrive;
         cache.insert(pkt.addr);
 
@@ -267,8 +268,8 @@ public:
         stats[ep]["Average latency"] += cache.delay;
         stats[-1]["Cache hit count"] += 1;
 
-        Logger::info() << "Cache hit: " << addr << "," << cur << ","
-                       << cur + cache.delay << std::endl;
+        XerxesLogger::info() << "Cache hit: " << addr << "," << cur << ","
+                             << cur + cache.delay << std::endl;
         cur += cache.delay;
         return true;
       }
@@ -357,8 +358,8 @@ public:
         : Interleaving(block_size), decoder(decoder) {
       this->trace_file.open(trace_file);
       if (!this->trace_file.is_open()) {
-        Logger::error() << "Cannot open trace file: " << trace_file
-                        << std::endl;
+        XerxesLogger::error()
+            << "Cannot open trace file: " << trace_file << std::endl;
         exit(1);
       }
     }

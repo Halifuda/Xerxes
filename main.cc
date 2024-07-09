@@ -40,15 +40,15 @@ int main() {
   fout << "id,type,addr,send,arrive,total_time" << std::endl;
   // Build a packet logger, triggered when a packet calls `log_stats()`.
   auto pkt_logger = [&](const xerxes::Packet &pkt) {
-    xerxes::Logger::info() << pkt.id << "," << xerxes::TypeName::of(pkt.type)
-                           << "," << std::hex << pkt.addr << std::dec << ","
-                           << pkt.sent << "," << pkt.arrive << ","
-                           << pkt.arrive - pkt.sent << std::endl;
+    xerxes::XerxesLogger::info()
+        << pkt.id << "," << xerxes::TypeName::of(pkt.type) << "," << std::hex
+        << pkt.addr << std::dec << "," << pkt.sent << "," << pkt.arrive << ","
+        << pkt.arrive - pkt.sent << std::endl;
     return 0;
   };
   // Initialize the global utils, including notifier, logger stream, log
   // level, pkt logger.
-  xerxes::global_init(&sim, fout, xerxes::LogLevel::INFO, pkt_logger);
+  xerxes::global_init(&sim, fout, xerxes::XerxesLogLevel::INFO, pkt_logger);
   // Add end points to the host.
   requester.add_end_point(mem.id(), 0, 64 * 1024, ratio);
 
