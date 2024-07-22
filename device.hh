@@ -69,6 +69,10 @@ public:
   }
 
   virtual void log_stats(std::ostream &os) {}
+
+  auto get_transit_func() {
+    return [this]() { transit(); };
+  }
 };
 } // namespace xerxes
 

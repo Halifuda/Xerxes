@@ -98,7 +98,7 @@ private:
     size_t cap() { return capacity; }
     void push(const Packet &pkt) {
       if (full()) {
-        XerxesLogger::warn() << "Queue is full!" << std::endl;
+        XerxesLogger::warning() << "Queue is full!" << std::endl;
         return;
       }
       queue.insert(pkt.id);
