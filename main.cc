@@ -13,6 +13,7 @@ xerxes::Requester build_requester(xerxes::Simulation *sim,
                      .simulation(sim)
                      .issue_delay(config.issue_delay)
                      .burst_size(config.burst_size)
+                     .block_size(4096)
                      .q_capacity(config.q_capacity)
                      .cache_capacity(config.cache_capacity)
                      .cache_delay(config.cache_delay)
@@ -90,6 +91,7 @@ int main(int argc, char **argv) {
   // Initialize the global utils, including notifier, logger stream, log
   // level, pkt logger.
   xerxes::global_init(&sim, fout, xerxes::XerxesLogLevel::INFO, pkt_logger);
+
   // Add end points to the host.
   for (int i = 0; i < config.ep_num; ++i) {
     for (int j = 0; j < config.ep_num; ++j) {
@@ -134,6 +136,7 @@ int main(int argc, char **argv) {
       }
     }
   };
+
   // Simulation.
   while (clock_cnt < config.max_clock) {
     if (check_all_issued()) {
@@ -146,6 +149,7 @@ int main(int argc, char **argv) {
     clock_all_mems_to_tick(curt, not_changed);
     clock_cnt++;
   }
+
   while (clock_cnt < config.max_clock) {
     auto curt = xerxes::step();
     bool not_changed = last_curt == curt;

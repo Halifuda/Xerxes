@@ -122,12 +122,11 @@ private:
 public:
   Requester(Simulation *sim, size_t q_capacity, size_t cache_capacity,
             Tick cache_delay, Tick issue_delay, bool coherent,
-            size_t burst_size = 1, Interleaving *interleave = nullptr,
-            std::string name = "Host")
+            size_t burst_size = 1, size_t block_size = 64,
+            Interleaving *interleave = nullptr, std::string name = "Host")
       : Device(sim, name), end_points(interleave), q(q_capacity),
         cache(cache_capacity, cache_delay), issue_delay(issue_delay),
-        coherent(coherent), burst_size(burst_size),
-        block_size(burst_size * 64) {
+        coherent(coherent), burst_size(burst_size), block_size(block_size) {
     ASSERT(end_points != nullptr, "No interleave policy");
   }
 
@@ -357,11 +356,8 @@ public:
         size_t block_size = 64)
         : Interleaving(block_size), decoder(decoder) {
       this->trace_file.open(trace_file);
-      if (!this->trace_file.is_open()) {
-        XerxesLogger::error()
-            << "Cannot open trace file: " << trace_file << std::endl;
-        exit(1);
-      }
+      ASSERT(this->trace_file.is_open(),
+             std::string{"Cannot open trace file"} + trace_file);
     }
     bool eof() { return trace_file.eof(); }
     Request next() {
@@ -432,13 +428,14 @@ private:
   Tick issue_delay_i;
   bool coherent_i;
   size_t burst_size_i;
+  size_t block_size_i;
   Requester::Interleaving *interleave_i;
   std::string name_i;
 
 public:
   RequesterBuilder()
       : sim_i(nullptr), q_capacity_i(0), cache_capacity_i(0), cache_delay_i(0),
-        issue_delay_i(0), coherent_i(false), burst_size_i(1),
+        issue_delay_i(0), coherent_i(false), burst_size_i(1), block_size_i(64),
         interleave_i(nullptr), name_i("Host") {}
 
   RequesterBuilder &simulation(Simulation *sim) {
@@ -469,6 +466,10 @@ public:
     this->burst_size_i = burst_size;
     return *this;
   }
+  RequesterBuilder &block_size(size_t block_size) {
+    this->block_size_i = block_size;
+    return *this;
+  }
   RequesterBuilder &interleave(Requester::Interleaving *interleave) {
     this->interleave_i = interleave;
     return *this;
@@ -479,8 +480,8 @@ public:
   }
   Requester build() {
     return Requester(sim_i, q_capacity_i, cache_capacity_i, cache_delay_i,
-                     issue_delay_i, coherent_i, burst_size_i, interleave_i,
-                     name_i);
+                     issue_delay_i, coherent_i, burst_size_i, block_size_i,
+                     interleave_i, name_i);
   }
 };
 

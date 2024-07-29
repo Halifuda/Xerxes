@@ -33,10 +33,10 @@ struct XerxesConfigs {
   Tick cache_delay = 12;
   // Coherent of the requester.
   bool coherent = false;
-  // Interleaving type of the requester.
+  // Interleaving type of the requester. stream/random/trace
   std::string interleave_type = "stream";
   // Interleaving parameter of the requester.
-  size_t interleave_param = 500;
+  size_t interleave_param = 5;
   // Trace file, if needed.
   std::string trace_file = "";
 

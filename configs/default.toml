@@ -1,4 +1,4 @@
-ep_num = 4
+ep_num = 1
 rw_ratio = 0.1
 max_clock = 1000000
 clock_granu = 10
@@ -7,12 +7,13 @@ log_name = "output/try.csv"
 [requester]
 issue_delay = 0
 burst_size = 1
+block_size = 4096
 q_capacity = 16
 cache_capacity = 8192
 cache_delay = 12
 coherent = false
 interleave_type = "stream"
-interleave_param = 200
+interleave_param = 5
 
 [bus]
 full_duplex = true
