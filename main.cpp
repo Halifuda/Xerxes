@@ -57,9 +57,9 @@ int main(int argc, char *argv[]) {
       1000,     20,       1,        1,           1,
       true,     true,     1000,     20,          1,
       8,        64,       0 * tick, 0 * tick,    (64 * 600),
-      1 * tick, 0 * tick, 1,        10000,       "output/dram.ini",
+      1 * tick, 0 * tick, 1,        10000,       "simplessd/simplessd/config/PCIe4.cfg",
       80000,    128,      128,      1,           xerxes::LogLevel::INFO,
-      0,        1,        8,        "/dev/null", "/dev/null"};
+      0,        1,        8,        "output/output.csv", "output/stats.csv"};
 
   // config.frame_size = atoi(argv[1]);
   config.memcnt = atoi(argv[1]);
@@ -95,25 +95,20 @@ void epoch(EpochConfig &config) {
 
   // Make devices.
   std::vector<xerxes::Requester *> hosts = {};
-  std::vector<xerxes::DRAMsim3Interface *> mems = {};
+  std::vector<xerxes::SimpleSSDInterface *> mems = {};
   for (int i = 0; i < config.hostcnt; ++i) {
     hosts.push_back(new xerxes::Requester{
         sim.topology(), config.hostq, 1, config.host_inv_time, config.hostd,
         false, config.burst, new xerxes::Requester::Random{config.cnt}});
   }
   for (int i = 0; i < config.memcnt; ++i) {
-    mems.push_back(new xerxes::DRAMsim3Interface{sim.topology(), config.clock,
-                                                 config.proce, 0, config.config,
-                                                 "output", "mem"});
+    mems.push_back(new xerxes::SimpleSSDInterface{sim.topology(), config.proce, 
+                                                    0, config.config,
+                                                    "output", "mem"});
   }
   auto bus = new xerxes::DuplexBus{
       sim.topology(), config.is_full, config.halft,      config.tpert,
       config.bwidth,  config.framing, config.frame_size, "bus"};
-  auto swtch0 = new xerxes::Switch{sim.topology(), config.switch_delay};
-  auto swtch1 = new xerxes::Switch{sim.topology(), config.switch_delay};
-
-  auto pkg0 = new xerxes::Packing{sim.topology(), config.package_num};
-  auto pkg1 = new xerxes::Packing{sim.topology(), config.package_num};
 
   // Make topology by `add_dev()` and `add_edge()`.
   // Use `build_route()` to acctually build route table.
@@ -124,20 +119,13 @@ void epoch(EpochConfig &config) {
   for (int i = 0; i < config.memcnt; ++i) {
     sim.system()->add_dev(mems[i]);
   }
-  sim.system()->add_dev(bus)->add_dev(swtch0)->add_dev(swtch1);
-  sim.system()->add_dev(pkg0)->add_dev(pkg1);
-  pkg0->add_upstream(swtch0->id());
-  pkg1->add_upstream(swtch1->id());
+  sim.system()->add_dev(bus);
+
   for (int i = 0; i < config.hostcnt; ++i) {
-    sim.topology()->add_edge(hosts[i]->id(), swtch0->id());
+    sim.topology()->add_edge(hosts[i]->id(), bus->id());
   }
-  sim.topology()
-      ->add_edge(swtch0->id(), pkg0->id())
-      ->add_edge(pkg0->id(), bus->id())
-      ->add_edge(bus->id(), pkg1->id())
-      ->add_edge(pkg1->id(), swtch1->id());
   for (int i = 0; i < config.memcnt; ++i) {
-    sim.topology()->add_edge(swtch1->id(), mems[i]->id());
+    sim.topology()->add_edge(bus->id(), mems[i]->id());
   }
   sim.topology()->build_route();
 
@@ -195,55 +183,55 @@ void epoch(EpochConfig &config) {
 
   // Run the simulation.
   // std::cout << "Start simulation." << std::endl;
-  for (int i = 0; i < config.hostcnt; ++i) {
-    hosts[i]->register_issue_event(0);
-  }
-  auto clock_cnt = 0;
-  while (clock_cnt < 100000000) {
-    bool all_finished = true;
-    for (int i = 0; i < config.hostcnt; ++i) {
-      if (!hosts[i]->all_issued()) {
-        all_finished = false;
-        break;
-      }
-    }
-    if (all_finished) {
-      break;
-    }
-    if (!xerxes::xerxes_events_empty()) {
-      xerxes::step();
-    } else {
-      for (int i = 0; i < config.grain; ++i) {
-        for (int j = 0; j < config.memcnt; ++j) {
-          mems[j]->clock();
-          clock_cnt++;
-        }
-      }
-    }
-  }
+  // for (int i = 0; i < config.hostcnt; ++i) {
+  //   hosts[i]->register_issue_event(0);
+  // }
+  // auto clock_cnt = 0;
+  // while (clock_cnt < 100000000) {
+  //   bool all_finished = true;
+  //   for (int i = 0; i < config.hostcnt; ++i) {
+  //     if (!hosts[i]->all_issued()) {
+  //       all_finished = false;
+  //       break;
+  //     }
+  //   }
+  //   if (all_finished) {
+  //     break;
+  //   }
+  //   if (!xerxes::xerxes_events_empty()) {
+  //     xerxes::step();
+  //   } else {
+  //     for (int i = 0; i < config.grain; ++i) {
+  //       for (int j = 0; j < config.memcnt; ++j) {
+  //         mems[j]->clock();
+  //         clock_cnt++;
+  //       }
+  //     }
+  //   }
+  // }
 
-  while (clock_cnt < 100000000) {
-    if (!xerxes::xerxes_events_empty()) {
-      xerxes::step();
-    } else {
-      for (int i = 0; i < config.grain; ++i) {
-        for (int j = 0; j < config.memcnt; ++j) {
-          mems[j]->clock();
-          clock_cnt++;
-        }
-      }
-    }
-    bool all_empty = true;
-    for (int i = 0; i < config.hostcnt; ++i) {
-      if (!hosts[i]->q_empty()) {
-        all_empty = false;
-        break;
-      }
-    }
-    if (all_empty) {
-      break;
-    }
-  }
+  // while (clock_cnt < 100000000) {
+  //   if (!xerxes::xerxes_events_empty()) {
+  //     xerxes::step();
+  //   } else {
+  //     for (int i = 0; i < config.grain; ++i) {
+  //       for (int j = 0; j < config.memcnt; ++j) {
+  //         mems[j]->clock();
+  //         clock_cnt++;
+  //       }
+  //     }
+  //   }
+  //   bool all_empty = true;
+  //   for (int i = 0; i < config.hostcnt; ++i) {
+  //     if (!hosts[i]->q_empty()) {
+  //       all_empty = false;
+  //       break;
+  //     }
+  //   }
+  //   if (all_empty) {
+  //     break;
+  //   }
+  // }
 
   // Log the statistics of the devices.
   std::fstream stats_out = std::fstream(config.stats_out, std::ios::out);

@@ -7,6 +7,7 @@
 #include "burst_pack.hpp"
 #include "bus.hpp"
 #include "dramsim3_interface.hpp"
+#include "simplessd_interface.hpp"
 #include "requester.hpp"
 #include "snoop.hpp"
 #include "switch.hpp"
