@@ -28,11 +28,16 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 # Set cache entry for external library include path
-set(DRAMPOWER_SOURCE_DIR "." CACHE PATH "Source directory to DRAMPower library")
+set(DRAMPOWER_SOURCE_DIR
+  "${PROJECT_SOURCE_DIR}/drampower/src"
+  CACHE PATH
+  ""
+  FORCE
+)
 
 # Check DRAMPOWER_SOURCE_DIR is valid
 if (NOT EXISTS "${DRAMPOWER_SOURCE_DIR}/libdrampower/LibDRAMPower.h")
-  message(FATAL_ERROR "Failed to find DRAMPower library. \
+  message(FATAL_ERROR "Failed to find DRAMPower library ${DRAMPOWER_SOURCE_DIR}/libdrampower/LibDRAMPower.h. \
 Check you specified DRAMPower path by -DDRAMPOWER_SOURCE_DIR.")
 endif ()
 

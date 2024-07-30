@@ -1,6 +1,6 @@
 #pragma once
-#include "simplessd-standalone/simplessd/pal/pal.hh"
-#include "simplessd-standalone/simplessd/sim/config_reader.hh"
+#include "simplessd/pal/pal.hh"
+#include "simplessd/sim/config_reader.hh"
 #include "def.hpp"
 #include "device.hpp"
 #include "utils.hpp"

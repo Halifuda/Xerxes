@@ -3,12 +3,10 @@ project(Xerxes VERSION 0.1.0 LANGUAGES C CXX)
 
 
 add_subdirectory(DRAMsim3)
-add_subdirectory(simplessd-standalone)
+add_subdirectory(${PROJECT_SOURCE_DIR}/simplessd)
 
 include_directories(DRAMsim3/ext/headers)
-INCLUDE_DIRECTORIES(
-    ${SIMPLESSDSTANDALONE_INCLUDE_DIR}  # 下级头文件目录
-)
+include_directories(${PROJECT_SOURCE_DIR}/simplessd)
 
 add_executable(Xerxes main.cpp xerxes_core.cpp)
 set(CMAKE_EXPORT_COMPILE_COMMANDS True)
