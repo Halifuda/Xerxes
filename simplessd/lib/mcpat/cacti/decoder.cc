@@ -154,7 +154,7 @@ void Decoder::compute_area() {
 
     for (int i = 1; i < num_gates; i++) {
       cumulative_area +=
-          compute_gate_area(INV, 1, w_dec_p[i], w_dec_n[i], area.h);
+          compute_gate_area(CACTI_INV, 1, w_dec_p[i], w_dec_n[i], area.h);
       cumulative_curr +=
           cmos_Isub_leakage(w_dec_n[i], w_dec_p[i], 1, inv, is_dram);
       cumulative_curr_Ig =
@@ -626,7 +626,7 @@ void PredecBlk::compute_area() {
     }
 
     for (int i = 1; i < number_gates_L1_nand2_path; ++i) {
-      tot_area_L1_nand2 += compute_gate_area(INV, 1, w_L1_nand2_p[i],
+      tot_area_L1_nand2 += compute_gate_area(CACTI_INV, 1, w_L1_nand2_p[i],
                                              w_L1_nand2_n[i], g_tp.cell_h_def);
       leak_L1_nand2 += cmos_Isub_leakage(w_L1_nand2_n[i], w_L1_nand2_p[i], 2,
                                          nand, is_dram_);
@@ -638,7 +638,7 @@ void PredecBlk::compute_area() {
     gate_leak_L1_nand2 *= num_L1_nand2;
 
     for (int i = 1; i < number_gates_L1_nand3_path; ++i) {
-      tot_area_L1_nand3 += compute_gate_area(INV, 1, w_L1_nand3_p[i],
+      tot_area_L1_nand3 += compute_gate_area(CACTI_INV, 1, w_L1_nand3_p[i],
                                              w_L1_nand3_n[i], g_tp.cell_h_def);
       leak_L1_nand3 += cmos_Isub_leakage(w_L1_nand3_n[i], w_L1_nand3_p[i], 3,
                                          nand, is_dram_);
@@ -671,7 +671,7 @@ void PredecBlk::compute_area() {
 
     for (int i = 1; i < number_gates_L2; ++i) {
       cumulative_area_L2 +=
-          compute_gate_area(INV, 1, w_L2_p[i], w_L2_n[i], g_tp.cell_h_def);
+          compute_gate_area(CACTI_INV, 1, w_L2_p[i], w_L2_n[i], g_tp.cell_h_def);
       leakage_L2 += cmos_Isub_leakage(w_L2_n[i], w_L2_p[i], 2, inv, is_dram_);
       gate_leakage_L2 +=
           cmos_Ig_leakage(w_L2_n[i], w_L2_p[i], 2, inv, is_dram_);
@@ -1204,7 +1204,7 @@ void PredecBlkDrv::compute_area() {
                              // needed
     for (int i = 0; i < number_gates_nand2_path; ++i) {
       area_nand2_path +=
-          compute_gate_area(INV, 1, width_nand2_path_p[i],
+          compute_gate_area(CACTI_INV, 1, width_nand2_path_p[i],
                             width_nand2_path_n[i], g_tp.cell_h_def);
       leak_nand2_path += cmos_Isub_leakage(
           width_nand2_path_n[i], width_nand2_path_p[i], 1, inv, is_dram_);
@@ -1223,7 +1223,7 @@ void PredecBlkDrv::compute_area() {
 
     for (int i = 0; i < number_gates_nand3_path; ++i) {
       area_nand3_path +=
-          compute_gate_area(INV, 1, width_nand3_path_p[i],
+          compute_gate_area(CACTI_INV, 1, width_nand3_path_p[i],
                             width_nand3_path_n[i], g_tp.cell_h_def);
       leak_nand3_path += cmos_Isub_leakage(
           width_nand3_path_n[i], width_nand3_path_p[i], 1, inv, is_dram_);
@@ -1559,7 +1559,7 @@ void Driver::compute_area() {
   area.h = g_tp.cell_h_def;
   for (int i = 0; i < number_gates; i++) {
     cumulative_area +=
-        compute_gate_area(INV, 1, width_p[i], width_n[i], area.h);
+        compute_gate_area(CACTI_INV, 1, width_p[i], width_n[i], area.h);
   }
   area.w = (cumulative_area / area.h);
   if (power_gating) {

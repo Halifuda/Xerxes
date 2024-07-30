@@ -42,6 +42,7 @@ namespace xerxes
                 assert(0);
             } 
             pPAL = new SimpleSSD::PAL::PAL(conf);
+            printf("here\n");
         }
 
         Addr start_addr() const { return start; }

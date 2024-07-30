@@ -91,7 +91,7 @@ double Component::compute_gate_area(int gate_type, int num_inputs,
   num_folded_nmos = (int)(ceil(w_nmos / w_folded_nmos));
 
   switch (gate_type) {
-    case INV:
+    case CACTI_INV:
       total_ndiff_w = compute_diffusion_width(1, num_folded_nmos);
       total_pdiff_w = compute_diffusion_width(1, num_folded_pmos);
       break;

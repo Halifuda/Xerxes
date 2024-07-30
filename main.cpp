@@ -57,7 +57,7 @@ int main(int argc, char *argv[]) {
       1000,     20,       1,        1,           1,
       true,     true,     1000,     20,          1,
       8,        64,       0 * tick, 0 * tick,    (64 * 600),
-      1 * tick, 0 * tick, 1,        10000,       "simplessd/simplessd/config/PCIe4.cfg",
+      1 * tick, 0 * tick, 1,        10000,       "simplessd/config/PCIe4.cfg",
       80000,    128,      128,      1,           xerxes::LogLevel::INFO,
       0,        1,        8,        "output/output.csv", "output/stats.csv"};
 

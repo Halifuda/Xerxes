@@ -147,7 +147,7 @@ const double WmuxdrvNANDp = 0;
 #define MINSUBARRAYCOLS 2
 #define MAXSUBARRAYCOLS 262144
 
-#define _INV 0
+#define CACTI_INV 0
 #define NOR 1
 #define NAND 2
 

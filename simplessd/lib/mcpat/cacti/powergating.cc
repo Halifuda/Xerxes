@@ -105,7 +105,7 @@ Sleep_tx::Sleep_tx(double _perf_with_sleep_tx,
   width /= num_sleep_tx;
 
   //    double cell_hight = MAX(cell.w*2, g_tp.cell_h_def);
-  raw_area = compute_gate_area(INV, 1, width, p_to_n_sz_ratio * width, cell.h) /
+  raw_area = compute_gate_area(CACTI_INV, 1, width, p_to_n_sz_ratio * width, cell.h) /
              2;  // Only single device, assuming device is laid on the side of
                  // the circuit block without changing the height of the
                  // standard library cells (using the standard cell approach).

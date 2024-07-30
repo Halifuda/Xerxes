@@ -93,7 +93,7 @@ void Crossbar::compute_power() {
   double tri_cap = output_buffer();
   assert(tri_cap > 0);
   // area of a tristate logic
-  double g_area = compute_gate_area(INV, 1, TriS2 * g_tp.min_w_nmos_,
+  double g_area = compute_gate_area(CACTI_INV, 1, TriS2 * g_tp.min_w_nmos_,
                                     TriS2 * min_w_pmos, g_tp.cell_h_def);
   g_area *= 2;  // to model area of output transistors
   g_area += compute_gate_area(NAND, 2, TriS1 * 2 * g_tp.min_w_nmos_,

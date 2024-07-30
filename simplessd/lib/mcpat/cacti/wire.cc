@@ -149,7 +149,7 @@ void Wire::calculate_wire_stats() {
       repeater_spacing = global.area.w;
       repeater_size = global.area.h;
       area.set_area((wire_length / repeater_spacing) *
-                    compute_gate_area(_INV, 1, min_w_pmos * repeater_size,
+                    compute_gate_area(CACTI_INV, 1, min_w_pmos * repeater_size,
                                       g_tp.min_w_nmos_ * repeater_size,
                                       g_tp.cell_h_def));
     }
@@ -162,7 +162,7 @@ void Wire::calculate_wire_stats() {
       repeater_spacing = global_5.area.w;
       repeater_size = global_5.area.h;
       area.set_area((wire_length / repeater_spacing) *
-                    compute_gate_area(_INV, 1, min_w_pmos * repeater_size,
+                    compute_gate_area(CACTI_INV, 1, min_w_pmos * repeater_size,
                                       g_tp.min_w_nmos_ * repeater_size,
                                       g_tp.cell_h_def));
     }
@@ -175,7 +175,7 @@ void Wire::calculate_wire_stats() {
       repeater_spacing = global_10.area.w;
       repeater_size = global_10.area.h;
       area.set_area((wire_length / repeater_spacing) *
-                    compute_gate_area(_INV, 1, min_w_pmos * repeater_size,
+                    compute_gate_area(CACTI_INV, 1, min_w_pmos * repeater_size,
                                       g_tp.min_w_nmos_ * repeater_size,
                                       g_tp.cell_h_def));
     }
@@ -188,7 +188,7 @@ void Wire::calculate_wire_stats() {
       repeater_spacing = global_20.area.w;
       repeater_size = global_20.area.h;
       area.set_area((wire_length / repeater_spacing) *
-                    compute_gate_area(_INV, 1, min_w_pmos * repeater_size,
+                    compute_gate_area(CACTI_INV, 1, min_w_pmos * repeater_size,
                                       g_tp.min_w_nmos_ * repeater_size,
                                       g_tp.cell_h_def));
     }
@@ -201,7 +201,7 @@ void Wire::calculate_wire_stats() {
       repeater_spacing = global_30.area.w;
       repeater_size = global_30.area.h;
       area.set_area((wire_length / repeater_spacing) *
-                    compute_gate_area(_INV, 1, min_w_pmos * repeater_size,
+                    compute_gate_area(CACTI_INV, 1, min_w_pmos * repeater_size,
                                       g_tp.min_w_nmos_ * repeater_size,
                                       g_tp.cell_h_def));
     }
@@ -609,7 +609,7 @@ void Wire::delay_optimal_wire(/*bool reset_repeater_sizing*/) {
               repeater_scaling * tc;
 
   area.set_area((len / repeater_spacing_init) *
-                compute_gate_area(INV, 1, min_w_pmos * repeater_scaling,
+                compute_gate_area(CACTI_INV, 1, min_w_pmos * repeater_scaling,
                                   g_tp.min_w_nmos_ * repeater_scaling,
                                   g_tp.cell_h_def));
   power.readOp.dynamic =
