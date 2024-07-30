@@ -1,8 +1,10 @@
 #pragma once
+#ifndef XERXES_DRAMSIM3_INTERFACE_HH
+#define XERXES_DRAMSIM3_INTERFACE_HH
+
 #include "DRAMsim3/src/memory_system.h"
-#include "def.hpp"
-#include "device.hpp"
-#include "utils.hpp"
+#include "device.hh"
+#include "utils.hh"
 
 #include <list>
 #include <map>
@@ -51,12 +53,12 @@ private:
   }
 
 public:
-  DRAMsim3Interface(Topology *topology, const Tick tick_per_clock,
+  DRAMsim3Interface(Simulation *sim, const Tick tick_per_clock,
                     const Tick process_time, const Addr start,
                     const std::string &config_file,
                     const std::string &output_dir,
                     std::string name = "DRAMsim3Interface")
-      : Device(topology, name), start(start), tick_per_clock(tick_per_clock),
+      : Device(sim, name), start(start), tick_per_clock(tick_per_clock),
         process_time(process_time),
         memsys(config_file, output_dir,
                std::bind(&DRAMsim3Interface::callback, this,
@@ -70,8 +72,9 @@ public:
     auto pkt = receive_pkt();
     while (pkt.type != PacketType::PKT_TYPE_NUM) {
       if (pkt.dst == self) {
-        Logger::debug() << name() << " receive packet " << pkt.id << " from "
-                        << pkt.from << " at " << pkt.arrive << std::endl;
+        XerxesLogger::debug()
+            << name() << " receive packet " << pkt.id << " from " << pkt.from
+            << " at " << pkt.arrive << std::endl;
         pkt.delta_stat(DEVICE_PROCESS_TIME, (double)(process_time));
         pkt.arrive += process_time;
         pending.push_back(pkt);
@@ -88,8 +91,8 @@ public:
     if (it == issued.end())
       return;
     auto &pkt = it->second.front();
-    Logger::debug() << "Callback #" << pkt.id << "r at "
-                    << interface_clock * tick_per_clock << std::endl;
+    XerxesLogger::debug() << "Callback #" << pkt.id << "r at "
+                          << interface_clock * tick_per_clock << std::endl;
     std::swap(pkt.src, pkt.dst);
 
     // TODO: is the callback called at the exact tick?
@@ -143,3 +146,5 @@ public:
 };
 
 } // namespace xerxes
+
+#endif // XERXES_DRAMSIM3_INTERFACE_HH

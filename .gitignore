@@ -3,4 +3,7 @@ build/
 debug/
 output/
 .cache/
+<<<<<<< HEAD
 .vscode/
+=======
+>>>>>>> bcd8faf6c339997ef6fb5461133261d8403897df

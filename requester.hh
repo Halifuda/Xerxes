@@ -1,13 +1,13 @@
 #pragma once
+#ifndef XERXES_REQUESTER_HH
+#define XERXES_REQUESTER_HH
 
-#include "def.hpp"
-#include "device.hpp"
-#include "utils.hpp"
+#include "device.hh"
+#include "utils.hh"
 
 #include <algorithm>
 #include <cmath>
 #include <fstream>
-#include <iomanip>
 #include <list>
 #include <random>
 #include <set>
@@ -98,7 +98,7 @@ private:
     size_t cap() { return capacity; }
     void push(const Packet &pkt) {
       if (full()) {
-        Logger::warn() << "Queue is full!" << std::endl;
+        XerxesLogger::warning() << "Queue is full!" << std::endl;
         return;
       }
       queue.insert(pkt.id);
@@ -120,14 +120,13 @@ private:
   std::unordered_map<TopoID, std::unordered_map<std::string, double>> stats;
 
 public:
-  Requester(Topology *topology, size_t q_capacity, size_t cache_capacity,
+  Requester(Simulation *sim, size_t q_capacity, size_t cache_capacity,
             Tick cache_delay, Tick issue_delay, bool coherent,
-            size_t burst_size = 1, Interleaving *interleave = nullptr,
-            std::string name = "Host")
-      : Device(topology, name), end_points(interleave), q(q_capacity),
+            size_t burst_size = 1, size_t block_size = 64,
+            Interleaving *interleave = nullptr, std::string name = "Host")
+      : Device(sim, name), end_points(interleave), q(q_capacity),
         cache(cache_capacity, cache_delay), issue_delay(issue_delay),
-        coherent(coherent), burst_size(burst_size),
-        block_size(burst_size * 64) {
+        coherent(coherent), burst_size(burst_size), block_size(block_size) {
     ASSERT(end_points != nullptr, "No interleave policy");
   }
 
@@ -156,8 +155,9 @@ public:
     if (pkt.dst == self) {
       // On receive
       if (pkt.is_rsp) {
-        Logger::debug() << name() << " receive packet " << pkt.id
-                        << ", issue queue is full? " << q.full() << std::endl;
+        XerxesLogger::debug()
+            << name() << " receive packet " << pkt.id
+            << ", issue queue is full? " << q.full() << std::endl;
         last_arrive = pkt.arrive;
         cache.insert(pkt.addr);
 
@@ -267,8 +267,8 @@ public:
         stats[ep]["Average latency"] += cache.delay;
         stats[-1]["Cache hit count"] += 1;
 
-        Logger::info() << "Cache hit: " << addr << "," << cur << ","
-                       << cur + cache.delay << std::endl;
+        XerxesLogger::info() << "Cache hit: " << addr << "," << cur << ","
+                             << cur + cache.delay << std::endl;
         cur += cache.delay;
         return true;
       }
@@ -356,11 +356,8 @@ public:
         size_t block_size = 64)
         : Interleaving(block_size), decoder(decoder) {
       this->trace_file.open(trace_file);
-      if (!this->trace_file.is_open()) {
-        Logger::error() << "Cannot open trace file: " << trace_file
-                        << std::endl;
-        exit(1);
-      }
+      ASSERT(this->trace_file.is_open(),
+             std::string{"Cannot open trace file"} + trace_file);
     }
     bool eof() { return trace_file.eof(); }
     Request next() {
@@ -424,24 +421,25 @@ public:
 
 class RequesterBuilder {
 private:
-  Topology *topology_i;
+  Simulation *sim_i;
   size_t q_capacity_i;
   size_t cache_capacity_i;
   Tick cache_delay_i;
   Tick issue_delay_i;
   bool coherent_i;
   size_t burst_size_i;
+  size_t block_size_i;
   Requester::Interleaving *interleave_i;
   std::string name_i;
 
 public:
   RequesterBuilder()
-      : topology_i(nullptr), q_capacity_i(0), cache_capacity_i(0),
-        cache_delay_i(0), issue_delay_i(0), coherent_i(false), burst_size_i(1),
+      : sim_i(nullptr), q_capacity_i(0), cache_capacity_i(0), cache_delay_i(0),
+        issue_delay_i(0), coherent_i(false), burst_size_i(1), block_size_i(64),
         interleave_i(nullptr), name_i("Host") {}
 
-  RequesterBuilder &topology(Topology *topology) {
-    this->topology_i = topology;
+  RequesterBuilder &simulation(Simulation *sim) {
+    this->sim_i = sim;
     return *this;
   }
   RequesterBuilder &q_capacity(size_t q_capacity) {
@@ -468,6 +466,10 @@ public:
     this->burst_size_i = burst_size;
     return *this;
   }
+  RequesterBuilder &block_size(size_t block_size) {
+    this->block_size_i = block_size;
+    return *this;
+  }
   RequesterBuilder &interleave(Requester::Interleaving *interleave) {
     this->interleave_i = interleave;
     return *this;
@@ -477,10 +479,12 @@ public:
     return *this;
   }
   Requester build() {
-    return Requester(topology_i, q_capacity_i, cache_capacity_i, cache_delay_i,
-                     issue_delay_i, coherent_i, burst_size_i, interleave_i,
-                     name_i);
+    return Requester(sim_i, q_capacity_i, cache_capacity_i, cache_delay_i,
+                     issue_delay_i, coherent_i, burst_size_i, block_size_i,
+                     interleave_i, name_i);
   }
 };
 
 } // namespace xerxes
+
+#endif // XERXES_REQUESTER_HH

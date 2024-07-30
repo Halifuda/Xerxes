@@ -30,7 +30,7 @@ include_directories(
   ${DRAMPOWER_SOURCE_DIR}
 )
 
-add_executable(Xerxes main.cpp xerxes_core.cpp)
+add_executable(Xerxes main.cc xerxes_standalone.cc xerxes_basic.cc)
 set(CMAKE_EXPORT_COMPILE_COMMANDS True)
 target_compile_options(Xerxes PRIVATE -Wall)
 target_link_libraries(Xerxes PRIVATE dramsim3)

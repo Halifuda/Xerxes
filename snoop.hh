@@ -1,7 +1,9 @@
 #pragma once
-#include "def.hpp"
-#include "device.hpp"
-#include "utils.hpp"
+#ifndef XERXES_SNOOP_HH
+#define XERXES_SNOOP_HH
+
+#include "device.hh"
+#include "utils.hh"
 
 #include <map>
 #include <utility>
@@ -167,9 +169,9 @@ private:
                    .dst(owner)
                    .is_rsp(false)
                    .build();
-    Logger::debug() << name() << ": evict packet " << inv.id << ", addr "
-                    << start << ", burst " << burst << ", owner " << owner
-                    << std::endl;
+    XerxesLogger::debug() << name() << ": evict packet " << inv.id << ", addr "
+                          << start << ", burst " << burst << ", owner " << owner
+                          << std::endl;
     send_pkt(inv);
   }
 
@@ -177,8 +179,8 @@ private:
     ASSERT(eviction != nullptr, name() + ": eviction policy is null");
     auto &set = cache[set_i];
     auto victim = eviction->find_victim(set_i, true);
-    Logger::debug() << name() << ": evict victim [" << set_i << ": " << victim
-                    << "]" << std::endl;
+    XerxesLogger::debug() << name() << ": evict victim [" << set_i << ": "
+                          << victim << "]" << std::endl;
     if (victim != -1) {
       auto &line = set[victim];
       auto peek = peek_burst_evict(line.addr, line.owner);
@@ -209,14 +211,14 @@ private:
           host_trig_conflict_count[pkt.src] = 0;
         }
         host_trig_conflict_count[pkt.src] += 1;
-        Logger::debug() << name() << ": pkt " << pkt.id << " wait evict ["
-                        << set_i << "]" << std::endl;
+        XerxesLogger::debug() << name() << ": pkt " << pkt.id << " wait evict ["
+                              << set_i << "]" << std::endl;
         waiting[set_i].insert(std::make_pair(pkt.id, pkt));
         evict(set_i, pkt.arrive);
       } else {
         // Empty way. Allocate.
-        Logger::debug() << name() << ": pkt " << pkt.id << " allocate ["
-                        << set_i << ":" << new_way_i << "]" << std::endl;
+        XerxesLogger::debug() << name() << ": pkt " << pkt.id << " allocate ["
+                              << set_i << ":" << new_way_i << "]" << std::endl;
         update(pkt.addr, set_i, new_way_i, pkt.src, WAIT_DRAM, true, true);
 
         // Directly send the packet.
@@ -232,16 +234,16 @@ private:
         }
         host_trig_conflict_count[pkt.src] += 1;
         // Insert the packet to waiting list.
-        Logger::debug() << name() << ": pkt " << pkt.id << " conflict ["
-                        << set_i << ":" << way_i << "]" << std::endl;
+        XerxesLogger::debug() << name() << ": pkt " << pkt.id << " conflict ["
+                              << set_i << ":" << way_i << "]" << std::endl;
         waiting[set_i].insert(std::make_pair(pkt.id, pkt));
         auto peek = peek_burst_evict(line.addr, line.owner);
         conduct_burst_evict(peek.first, peek.second, line.owner, pkt.arrive);
 
       } else {
         // Hit. Directly send back (host should hold the data already).
-        Logger::debug() << name() << ": pkt " << pkt.id << " hit at [" << set_i
-                        << ":" << way_i << "]" << std::endl;
+        XerxesLogger::debug() << name() << ": pkt " << pkt.id << " hit at ["
+                              << set_i << ":" << way_i << "]" << std::endl;
         std::swap(pkt.src, pkt.dst);
         pkt.is_rsp = true;
         send_pkt(pkt);
@@ -270,8 +272,9 @@ private:
       if (waiting_it != waiting[set_i].end()) {
         // Some packet is waiting for this eviction.
         auto &waiter = waiting_it->second;
-        Logger::debug() << name() << ": insert waiter pkt " << waiter.id
-                        << " to [" << set_i << ":" << way_i << "]" << std::endl;
+        XerxesLogger::debug()
+            << name() << ": insert waiter pkt " << waiter.id << " to [" << set_i
+            << ":" << way_i << "]" << std::endl;
         update(waiter.addr, set_i, way_i, waiter.src, WAIT_DRAM, true, true);
         // Send the waiting.
         if (tick > waiter.arrive) {
@@ -296,27 +299,29 @@ private:
         auto set_i = set_of(pkt.addr);
         auto way_i = hit(pkt.addr, pkt.dst);
         if (way_i != -1) {
-          Logger::debug() << name() << ": DRAM rsp pkt " << pkt.id << " hit ["
-                          << set_i << ":" << way_i << "]" << std::endl;
+          XerxesLogger::debug()
+              << name() << ": DRAM rsp pkt " << pkt.id << " hit [" << set_i
+              << ":" << way_i << "]" << std::endl;
           update(pkt.addr, set_i, way_i, pkt.dst, EXCLUSIVE, true, false);
           if (waiting[set_i].size() > 0) {
             // Try an eviction.
-            Logger::debug() << " try evict [" << set_i << "]" << std::endl;
+            XerxesLogger::debug()
+                << " try evict [" << set_i << "]" << std::endl;
             evict(set_i, tick);
           }
         }
       }
-      Logger::debug() << name() << " send packet " << pkt.id << std::endl;
+      XerxesLogger::debug() << name() << " send packet " << pkt.id << std::endl;
       log_transit_normal(pkt);
       send_pkt(pkt);
     }
   }
 
 public:
-  Snoop(Topology *topology, size_t line_num, size_t assoc, size_t max_burst_inv,
+  Snoop(Simulation *sim, size_t line_num, size_t assoc, size_t max_burst_inv,
         SnoopEviction *eviction = nullptr, bool log_inv = false,
         std::string name = "Snoop")
-      : Device(topology, name), line_num(line_num), assoc(assoc),
+      : Device(sim, name), line_num(line_num), assoc(assoc),
         set_num(line_num / assoc), max_burst_inv(max_burst_inv),
         eviction(eviction), log_inv(log_inv) {
     ASSERT(line_num % assoc == 0, "snoop: size % assoc != 0");
@@ -334,7 +339,8 @@ public:
     // filter all packets
     auto pkt = receive_pkt();
     if (!pkt.is_rsp)
-      Logger::debug() << name() << " receive packet " << pkt.id << std::endl;
+      XerxesLogger::debug()
+          << name() << " receive packet " << pkt.id << std::endl;
     filter(pkt);
   }
 
@@ -596,3 +602,5 @@ public:
 };
 
 } // namespace xerxes
+
+#endif // XERXES_SNOOP_HH

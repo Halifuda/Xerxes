@@ -1,6 +1,8 @@
 #pragma once
-#include "def.hpp"
-#include "device.hpp"
+#ifndef XERXES_BURST_PACK_HH
+#define XERXES_BURST_PACK_HH
+
+#include "device.hh"
 
 #include <unordered_set>
 
@@ -18,24 +20,24 @@ private:
   size_t cur_pkg_id = 0;
 
 public:
-  Packing(Topology *topology, size_t packaging_num,
-          std::string name = "Packaging")
-      : Device(topology, name), packaging_num(packaging_num) {}
+  Packing(Simulation *sim, size_t packaging_num, std::string name = "Packaging")
+      : Device(sim, name), packaging_num(packaging_num) {}
 
   void add_upstream(TopoID host) { upstreams.insert(host); }
 
   void transit() override {
     auto pkt = receive_pkt();
     auto tick = pkt.arrive;
-    Logger::debug() << name() << " receive packet " << pkt.id << std::endl;
+    XerxesLogger::debug() << name() << " receive packet " << pkt.id
+                          << std::endl;
     if (upstreams.find(pkt.from) == upstreams.end()) {
-      Logger::debug() << name() << " directly send packet " << pkt.id
-                      << (pkt.is_rsp ? "r" : "") << std::endl;
+      XerxesLogger::debug() << name() << " directly send packet " << pkt.id
+                            << (pkt.is_rsp ? "r" : "") << std::endl;
       send_pkt(pkt);
       return;
     }
-    Logger::debug() << name() << " package packet " << pkt.id
-                    << (pkt.is_rsp ? "r" : "") << std::endl;
+    XerxesLogger::debug() << name() << " package packet " << pkt.id
+                          << (pkt.is_rsp ? "r" : "") << std::endl;
     auto it = packages.find(cur_pkg_id);
     if (it == packages.end()) {
       auto pkg = Package{};
@@ -57,8 +59,8 @@ public:
                                                : 0));
         sub_pkt.second.arrive =
             (tick > sub_pkt.second.arrive ? tick : sub_pkt.second.arrive);
-        Logger::debug() << name() << " send packet " << sub_pkt.second.id
-                        << std::endl;
+        XerxesLogger::debug()
+            << name() << " send packet " << sub_pkt.second.id << std::endl;
         send_pkt(sub_pkt.second);
       }
       packages.erase(cur_pkg_id++);
@@ -76,12 +78,13 @@ private:
   std::unordered_map<PktID, PktID> reverse;
 
 public:
-  BurstHandler(Topology *topology, std::string name = "BurstHandler")
-      : Device(topology, name) {}
+  BurstHandler(Simulation *sim, std::string name = "BurstHandler")
+      : Device(sim, name) {}
 
   void transit() override {
     auto pkt = receive_pkt();
-    Logger::debug() << name() << " receive packet " << pkt.id << std::endl;
+    XerxesLogger::debug() << name() << " receive packet " << pkt.id
+                          << std::endl;
     if (pkt.type == INV || pkt.type == CORUPT || pkt.burst <= 1) {
       send_pkt(pkt);
       return;
@@ -108,8 +111,8 @@ public:
                   .build();
           bursts[id].sub_pkts.insert(new_pkt.id);
           reverse[new_pkt.id] = id;
-          Logger::debug() << name() << " send sub-packet " << new_pkt.id
-                          << std::endl;
+          XerxesLogger::debug()
+              << name() << " send sub-packet " << new_pkt.id << std::endl;
           send_pkt(new_pkt);
         }
       } else {
@@ -128,8 +131,8 @@ public:
 
         rec.sub_pkts.erase(id);
         if (rec.sub_pkts.empty()) {
-          Logger::debug() << name() << " send origin packet " << rec.origin.id
-                          << std::endl;
+          XerxesLogger::debug()
+              << name() << " send origin packet " << rec.origin.id << std::endl;
 
           rec.origin.delta_stat(WAIT_ALL_BURST,
                                 (double)(pkt.arrive - rec.origin.arrive));
@@ -148,3 +151,5 @@ public:
 };
 
 } // namespace xerxes
+
+#endif // XERXES_BURST_PACK_HH
