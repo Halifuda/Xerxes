@@ -10,9 +10,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/debug/Xerxes",
             "args": [
-                "1",
-                "0.5",
-                "1000"
+                "configs/default.toml"
             ],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",

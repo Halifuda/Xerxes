@@ -90,7 +90,8 @@ void OpCount::SetOpCount(uint32_t nchannel, uint32_t npackage, uint32_t ndie, ui
     plane = nplane;
     block = nblock;
     page = npage;
-    if(!use){
+    
+    if(!this->use){
       debugprint(LOG_OPCOUNT, "OpCount is close");
       opprint("OpCount is close");
       return;

@@ -27,5 +27,5 @@ dram_capacity = 65536
 tick_per_clock = 1
 ctrl_proc_time = 25
 start_addr = 0
-dram_config = "DRAMsim3/configs/DDR4_8Gb_x8_3200.ini"
+dram_config = "simplessd/config/PCIe4.cfg"
 log_dir = "output"

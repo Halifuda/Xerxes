@@ -1,9 +1,10 @@
 #pragma once
 #include "simplessd/pal/pal.hh"
 #include "simplessd/sim/config_reader.hh"
-#include "def.hpp"
-#include "device.hpp"
-#include "utils.hpp"
+#include "simplessd/count/Counts.hh"
+#include "def.hh"
+#include "device.hh"
+#include "utils.hh"
 
 #include <list>
 #include <map>
@@ -25,24 +26,29 @@ namespace xerxes
 
         void issue()
         {
-            // TODO
+            std::vector<std::vector<Packet>::iterator> to_erase;
+            for (auto it = pending.begin(); it != pending.end(); ++it) {
+                auto &pkt = *it;
+                // TODO: handle packet
+                
+                pending.erase(it);
+            }
         }
 
     public:
-        SimpleSSDInterface(Topology *topology, const Tick process_time,
-                           const Addr start,
+        SimpleSSDInterface(Simulation *sim, const Tick process_time, const Addr start,
                            const std::string &config_file,
-                           const std::string &output_dir,
                            std::string name = "SimpleSSDInterface")
-            : Device(topology, name), start(start), process_time(process_time)
+            : Device(sim, name), start(start), process_time(process_time)
         {
             SimpleSSD::ConfigReader conf;
             if (!conf.init(config_file)) {
                 std::cerr << " Failed to open simulation configuration file!" << std::endl;
                 assert(0);
             } 
+            SimpleSSD::Count::InitOpCount(conf);
+
             pPAL = new SimpleSSD::PAL::PAL(conf);
-            printf("here\n");
         }
 
         Addr start_addr() const { return start; }
@@ -54,7 +60,7 @@ namespace xerxes
             {
                 if (pkt.dst == self)
                 {
-                    Logger::debug() << name() << " receive packet " << pkt.id << " from "
+                    XerxesLogger::debug() << name() << " receive packet " << pkt.id << " from "
                                     << pkt.from << " at " << pkt.arrive << std::endl;
                     pkt.delta_stat(DEVICE_PROCESS_TIME, (double)(process_time));
                     pkt.arrive += process_time;

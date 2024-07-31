@@ -1,6 +1,7 @@
 #include "bus.hh"
 #include "def.hh"
 #include "dramsim3_interface.hh"
+#include "simplessd_interface.hh"
 #include "requester.hh"
 #include "xerxes_standalone.hh"
 
@@ -43,7 +44,7 @@ int main(int argc, char **argv) {
   auto config = xerxes::parse_basic_configs(argv[1]);
   // Make devices.
   std::vector<xerxes::Requester> requesters;
-  std::vector<xerxes::DRAMsim3Interface *> mems;
+  std::vector<xerxes::SimpleSSDInterface *> mems;
 
   auto bus = xerxes::DuplexBus{&sim,
                                config.full_duplex,
@@ -54,9 +55,7 @@ int main(int argc, char **argv) {
                                config.frame_size};
   for (int i = 0; i < config.ep_num; ++i) {
     requesters.push_back(build_requester(&sim, config));
-    mems.push_back(new xerxes::DRAMsim3Interface{
-        &sim, config.tick_per_clock, config.ctrl_proc_time, config.start_addr,
-        config.dram_config, config.dram_log_dir});
+    mems.push_back(new xerxes::SimpleSSDInterface{&sim, config.ctrl_proc_time, 0, config.dram_config});
   }
 
   // Make topology by `add_dev()` and `add_edge()`.
@@ -106,7 +105,6 @@ int main(int argc, char **argv) {
   for (auto &requester : requesters)
     requester.register_issue_event(0);
   xerxes::Tick clock_cnt = 0;
-  xerxes::Tick last_curt = INT_MAX;
   auto check_all_issued = [&requesters]() {
     for (auto &requester : requesters) {
       if (!requester.all_issued()) {
@@ -123,19 +121,6 @@ int main(int argc, char **argv) {
     }
     return true;
   };
-  std::vector<xerxes::Tick> mems_tick(mems.size(), 0);
-  auto clock_all_mems_to_tick = [&mems, &mems_tick, &config](xerxes::Tick tick,
-                                                             bool not_changed) {
-    for (size_t i = 0; i < mems.size(); ++i)
-      mems_tick[i] = 0;
-    for (size_t i = 0; i < mems.size(); ++i) {
-      for (int g = 0;
-           g < config.clock_granu && (mems_tick[i] < tick || not_changed);
-           ++g) {
-        mems_tick[i] = mems[i]->clock();
-      }
-    }
-  };
 
   // Simulation.
   while (clock_cnt < config.max_clock) {
@@ -143,23 +128,17 @@ int main(int argc, char **argv) {
       break;
     }
     auto curt = xerxes::step();
-    bool not_changed = last_curt == curt;
-    last_curt = curt;
-    // TODO: automate clock align.
-    clock_all_mems_to_tick(curt, not_changed);
-    clock_cnt++;
+    clock_cnt += 1;
   }
 
   while (clock_cnt < config.max_clock) {
     auto curt = xerxes::step();
-    bool not_changed = last_curt == curt;
-    last_curt = curt;
-    clock_all_mems_to_tick(curt, not_changed);
-    clock_cnt++;
     if (check_all_empty()) {
       break;
     }
+    clock_cnt += 1;
   }
+
   std::cout << "Simulation finished." << std::endl;
   return 0;
 }
