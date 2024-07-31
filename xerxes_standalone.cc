@@ -11,21 +11,12 @@
 namespace xerxes {
 Simulation *glb_sim = nullptr;
 
-void global_init(Simulation *sim, std::ostream &os, XerxesLogLevel level,
-                 Packet::XerxesLoggerFunc pkt_logger) {
-  glb_sim = sim;
-  XerxesLogger::set(os, level);
-  Packet::pkt_logger(true, pkt_logger);
-}
-
-class EventEngine {
+class EventEngine: public SimpleSSD::Simulator {
   std::multimap<Tick, EventFunc> events;
-
-public:
-  // 为了兼容simplessd
-  SimpleSSD::Event counter = 0;
+  SimpleSSD::Event counter;
   std::unordered_map<SimpleSSD::Event, SimpleSSD::EventFunction> eventTable;
 
+public:
   EventEngine() {}
 
   static EventEngine *glb(EventEngine *n = nullptr) {
@@ -48,8 +39,69 @@ public:
     return 0;
   }
 
+  // for simplessd
+  uint64_t getCurrentTick() override {
+    // TODO: 貌似Xerxes没有维护Tick？
+    return 0;
+  }
+
+  SimpleSSD::Event allocateEvent(SimpleSSD::EventFunction func) override {
+    auto iter = eventTable.insert({++counter, func});
+
+    if (!iter.second) assert(0);
+
+    return counter;
+  }
+
+  void scheduleEvent(SimpleSSD::Event eid, uint64_t tick) override {
+    auto iter = eventTable.find(eid);
+  
+    if (iter != eventTable.end()) {
+      // TODO: Convert SimpleSSD EventFunction to Xerxes EventFunc
+      SimpleSSD::EventFunction f = iter->second;
+      add(tick, [f,tick](){f(tick);});
+    }
+    else assert(0);
+  }
+
+  void descheduleEvent(SimpleSSD::Event eid) override {
+    // TODO
+    assert(0);
+  }
+
+  bool isScheduled(SimpleSSD::Event eid, uint64_t *pTick) override {
+    bool ret = false;
+    auto iter = eventTable.find(eid);
+
+    if (iter != eventTable.end()) {
+      // TODO
+      assert(0);
+    }
+    else assert(0);
+
+    return ret;
+  }
+
+  void deallocateEvent(SimpleSSD::Event eid) override {
+    auto iter = eventTable.find(eid);
+
+    if (iter != eventTable.end()) {
+      // TODO: remove event from this.events
+      eventTable.erase(iter);
+    }
+    else assert(0);
+  }
+
   bool empty() { return events.empty(); }
 } glb_engine;
+
+void global_init(Simulation *sim, std::ostream &os, XerxesLogLevel level,
+                 Packet::XerxesLoggerFunc pkt_logger) {
+  glb_sim = sim;
+  SimpleSSD::setSimulator(&glb_engine);
+  XerxesLogger::set(os, level);
+  Packet::pkt_logger(true, pkt_logger);
+}
 
 void Device::sched_transit(Tick tick) {
   glb_engine.add(tick, [this]() { this->transit(); });
@@ -130,35 +182,6 @@ XerxesConfigs parse_basic_configs(std::string config_file_name) {
 
   return basic;
 };
-
-// for simplessd use only
-void xerxes_simplessd_schedule(SimpleSSD::Event e, uint64_t tick) { 
-  auto iter = glb_engine.eventTable.find(e);
-
-  if (iter != glb_engine.eventTable.end()) {
-    // TODO: SimpleSSD EventFunction to Xerxes EventFunc
-    xerxes_schedule(nullptr, tick);
-  }
-  else assert(0);
-}
-
-SimpleSSD::Event xerxes_simplessd_allocateEvent(SimpleSSD::EventFunction func) {
-  auto iter = glb_engine.eventTable.insert({++glb_engine.counter, func});
-
-  if (!iter.second) assert(0);
-
-  return glb_engine.counter;
-}
-
-void xerxes_simplessd_deallocateEvent(SimpleSSD::Event eid) {
-  auto iter = glb_engine.eventTable.find(eid);
-
-  if (iter != glb_engine.eventTable.end()) {
-    // TODO: remove event from glb_engine.events
-    glb_engine.eventTable.erase(iter);
-  }
-  else assert(0);
-}
 
 } // namespace xerxes
 

@@ -50,7 +50,36 @@ namespace xerxes
         } 
 
         void commit() {
-            printf("here\n");
+            SimpleSSD::PAL::Request req(0);
+            while (pPAL->commitToUpper(req)) {
+                auto iter = outstandingQueue.begin();
+                SimpleSSD::PAL::Request* curreq = &iter->first;
+                bool find = false;
+
+                while (iter != outstandingQueue.end()) {
+                    if (curreq->reqID == req.reqID && curreq->reqSubID == req.reqSubID &&
+                        curreq->ftlSubID == req.ftlSubID &&
+                        curreq->blockIndex == req.blockIndex &&
+                        curreq->pageIndex == req.pageIndex &&
+                        curreq->reqType == req.reqType) {
+                    
+                        find = true;
+                        outstandingQueue.erase(iter);
+                        // TODO: send_pkt
+                        Packet& pkt = iter->second;
+                        pkt.is_rsp = true;
+                        std::swap(pkt.src, pkt.from);
+                        send_pkt(pkt);
+                        break;
+                    }
+                    ++iter;
+                    curreq = &iter->first;
+                }
+
+                if(find == false) {
+                    assert(0);
+                }
+            }
         }
 
         void issue()

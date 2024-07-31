@@ -18,7 +18,6 @@
  */
 
 #include "sim/simulator.hh"
-#include "../xerxes_standalone.cc"
 
 namespace SimpleSSD {
 
@@ -41,7 +40,6 @@ Event allocate(EventFunction f) {
   if (sim) {
     return sim->allocateEvent(f);
   }
-  else xerxes::xerxes_simplessd_allocateEvent(f);
 
   return 0;
 }
@@ -49,10 +47,6 @@ Event allocate(EventFunction f) {
 void schedule(Event e, uint64_t t) {
   if (sim) {
     sim->scheduleEvent(e, t);
-  }
-  else {
-    xerxes::xerxes_simplessd_schedule(e, t);
-    printf("here1\n");
   }
 }
 
@@ -74,7 +68,6 @@ void deallocate(Event e) {
   if (sim) {
     sim->deallocateEvent(e);
   }
-  else xerxes::xerxes_simplessd_deallocateEvent(e);
 }
 
 }  // namespace SimpleSSD
