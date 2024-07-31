@@ -20,7 +20,7 @@ xerxes::Requester build_requester(xerxes::Simulation *sim,
                      .cache_delay(config.cache_delay)
                      .coherent(config.coherent);
   if (config.interleave_type == "stream") {
-    builder.interleave(new xerxes::Requester::Stream{config.interleave_param});
+    builder.interleave(new xerxes::Requester::Stream{config.interleave_param, 4096});
   } else if (config.interleave_type == "random") {
     builder.interleave(new xerxes::Requester::Random{config.interleave_param});
   } else if (config.interleave_type == "trace") {

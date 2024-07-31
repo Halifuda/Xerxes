@@ -78,7 +78,7 @@ else ()
   endif ()
 endif ()
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Specify source files
@@ -203,6 +203,9 @@ SOURCE_GROUP("Source Files\\pal\\async" FILES ${SRC_PAL_ASYNC})
 SOURCE_GROUP("Source Files\\sim" FILES ${SRC_SIM})
 SOURCE_GROUP("Source Files\\util" FILES ${SRC_UTIL})
 SOURCE_GROUP("Source Files\\error" FILES ${SRC_ERROR})
+
+
+set(CMAKE_CXX_FLAGS "-Wno-error=deprecated-declarations -Wno-deprecated-declarations ")
 
 # Define library
 add_library(simplessd STATIC

@@ -1,4 +1,8 @@
+#ifndef XERXES_STANDALONE_CC
+#define XERXES_STANDALONE_CC
+
 #include "xerxes_standalone.hh"
+#include "simplessd/sim/simulator.hh"
 #include "device.hh"
 #include "utils.hh"
 
@@ -18,6 +22,10 @@ class EventEngine {
   std::multimap<Tick, EventFunc> events;
 
 public:
+  // 为了兼容simplessd
+  SimpleSSD::Event counter = 0;
+  std::unordered_map<SimpleSSD::Event, SimpleSSD::EventFunction> eventTable;
+
   EventEngine() {}
 
   static EventEngine *glb(EventEngine *n = nullptr) {
@@ -122,4 +130,36 @@ XerxesConfigs parse_basic_configs(std::string config_file_name) {
 
   return basic;
 };
+
+// for simplessd use only
+void xerxes_simplessd_schedule(SimpleSSD::Event e, uint64_t tick) { 
+  auto iter = glb_engine.eventTable.find(e);
+
+  if (iter != glb_engine.eventTable.end()) {
+    // TODO: SimpleSSD EventFunction to Xerxes EventFunc
+    xerxes_schedule(nullptr, tick);
+  }
+  else assert(0);
+}
+
+SimpleSSD::Event xerxes_simplessd_allocateEvent(SimpleSSD::EventFunction func) {
+  auto iter = glb_engine.eventTable.insert({++glb_engine.counter, func});
+
+  if (!iter.second) assert(0);
+
+  return glb_engine.counter;
+}
+
+void xerxes_simplessd_deallocateEvent(SimpleSSD::Event eid) {
+  auto iter = glb_engine.eventTable.find(eid);
+
+  if (iter != glb_engine.eventTable.end()) {
+    // TODO: remove event from glb_engine.events
+    glb_engine.eventTable.erase(iter);
+  }
+  else assert(0);
+}
+
 } // namespace xerxes
+
+#endif // XERXES_STANDALONE_CC

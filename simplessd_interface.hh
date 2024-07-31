@@ -17,21 +17,65 @@ namespace xerxes
     private:
         Addr start;
 
-        std::vector<Packet> pending;
-        std::map<Addr, std::list<Packet>> issued;
+        std::list<Packet> pending;
+        std::list<pair<SimpleSSD::PAL::Request, Packet>> outstandingQueue;
 
         Tick process_time;
 
+        SimpleSSD::ConfigReader conf;
         SimpleSSD::PAL::PAL *pPAL;
+
+        SimpleSSD::PAL::Request convPALRequest(Packet *pkt) {
+            // TODO: req的全部信息应该包含到pkt中, 因为PAL无法查询FTL生成具体地址, 目前随意生成
+            SimpleSSD::PAL::Request req(1);
+            req.blockIndex = pkt->addr / 4096;
+            req.pageIndex = 0;
+            req.ioFlag.set();
+            req.beginAt = 0;
+
+            switch (pkt->type) {
+            case RD:
+            case NT_RD:
+                req.reqType = SimpleSSD::RequestType::READ;
+                break;
+            case WT:
+            case NT_WT:
+                req.reqType = SimpleSSD::RequestType::WRITE;
+                break;
+            default:
+                assert(0);
+            }
+
+            return req;
+        } 
+
+        void commit() {
+            printf("here\n");
+        }
 
         void issue()
         {
-            std::vector<std::vector<Packet>::iterator> to_erase;
-            for (auto it = pending.begin(); it != pending.end(); ++it) {
+            for (auto it = pending.begin(); it != pending.end();) {
                 auto &pkt = *it;
-                // TODO: handle packet
-                
-                pending.erase(it);
+                SimpleSSD::PAL::Request req = convPALRequest(&pkt);       
+                // TODO
+                outstandingQueue.push_back(make_pair(req, pkt));
+                auto tick = req.beginAt;
+                switch (req.reqType) {
+                case SimpleSSD::RequestType::READ:
+                    pPAL->read(req, tick);
+                    break;
+                case SimpleSSD::RequestType::WRITE:
+                    pPAL->write(req, tick);
+                    break;
+                case SimpleSSD::RequestType::PALERASE:
+                    pPAL->erase(req, tick);
+                    break;
+                default:
+                    assert(0);
+                    break;
+                }
+                it = pending.erase(it);
             }
         }
 
@@ -41,7 +85,6 @@ namespace xerxes
                            std::string name = "SimpleSSDInterface")
             : Device(sim, name), start(start), process_time(process_time)
         {
-            SimpleSSD::ConfigReader conf;
             if (!conf.init(config_file)) {
                 std::cerr << " Failed to open simulation configuration file!" << std::endl;
                 assert(0);
@@ -49,13 +92,14 @@ namespace xerxes
             SimpleSSD::Count::InitOpCount(conf);
 
             pPAL = new SimpleSSD::PAL::PAL(conf);
+            pPAL->setCommitCallback([this]() { commit(); });
         }
 
         Addr start_addr() const { return start; }
 
         void transit() override
         {
-            auto pkt = receive_pkt();
+            Packet pkt = receive_pkt();
             while (pkt.type != PacketType::PKT_TYPE_NUM)
             {
                 if (pkt.dst == self)
