@@ -1,0 +1,9 @@
+max_clock = 100
+clock_granu = 1
+log_name = "aaa"
+edges = [["aaa", "bbb"], ["bbb", "ccc"]]
+
+[devices]
+aaa = "Requester"
+bbb = "DuplexBus"
+ccc = "DRAMsim3Interface"

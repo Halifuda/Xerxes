@@ -67,6 +67,7 @@ public:
 #endif
 
 inline void __panic(const std::string &msg, const std::string &file, int line) {
+  std::cerr << "Panic at " << file << ":" << line << " : " << msg << std::endl;
   XerxesLogger::info() << "Panic at " << file << ":" << line << " : " << msg
                        << std::endl;
   std::exit(-1);

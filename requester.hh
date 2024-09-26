@@ -14,9 +14,29 @@
 #include <unordered_set>
 
 namespace xerxes {
-
-class Requester : public Device {
+class RequesterConfig {
 public:
+  size_t q_capacity = 32;
+  size_t cache_capacity = 8192;
+  Tick cache_delay = 12;
+  Tick issue_delay = 0;
+  bool coherent = false;
+  size_t burst_size = 1;
+  size_t block_size = 64;
+  std::string interleave_type = "stream";
+  size_t interleave_param = 5;
+  std::string trace_file = "";
+};
+} // namespace xerxes
+
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::RequesterConfig, q_capacity,
+                                       cache_capacity, cache_delay, issue_delay,
+                                       coherent, burst_size, block_size,
+                                       interleave_type, interleave_param,
+                                       trace_file);
+
+namespace xerxes {
+class Requester : public Device {
   class Interleaving {
   protected:
     std::random_device rd;
@@ -56,7 +76,96 @@ public:
     virtual bool eof() = 0;
   };
 
-private:
+  class Trace : public Interleaving {
+  public:
+    struct TraceReq {
+      Addr addr;
+      bool is_write;
+      Tick tick;
+    };
+
+  private:
+    std::ifstream trace_file;
+    std::function<TraceReq(std::ifstream &)> decoder;
+
+  public:
+    Trace(
+        std::string trace_file,
+        std::function<TraceReq(std::ifstream &)> decoder =
+            [](std::ifstream &file) {
+              static std::unordered_set<std::string> write_types = {
+                  "W", "WR", "WRITE", "write", "P_MEM_WR", "BOFF"};
+              std::string type;
+              Addr addr;
+              Tick tick;
+              file >> std::hex >> addr >> std::dec >> type >> tick;
+              return TraceReq{addr, write_types.count(type) > 0, tick};
+            },
+        size_t block_size = 64)
+        : Interleaving(block_size), decoder(decoder) {
+      this->trace_file.open(trace_file);
+      ASSERT(this->trace_file.is_open(),
+             std::string{"Cannot open trace file"} + trace_file);
+    }
+    bool eof() { return trace_file.eof(); }
+    Request next() {
+      // TODO: flexible trace decoding
+      auto req = decoder(trace_file);
+      auto ep = end_points[cur].id;
+      req.addr = (req.addr % end_points[cur].capacity) + end_points[cur].start;
+      cur = (cur + 1) % end_points.size();
+      return {ep, req.addr, req.tick, req.is_write};
+    }
+  };
+
+  class Stream : public Interleaving {
+    size_t total_count;
+    size_t cur_count = 0;
+
+  public:
+    Stream(size_t total_count, size_t block_size = 64)
+        : Interleaving(block_size), total_count(total_count) {}
+    bool eof() { return cur_count == total_count; }
+    Request next() {
+      auto ep = end_points[cur].id;
+      auto addr = end_points[cur].cur;
+      end_points[cur].cur += block_size;
+      if (end_points[cur].cur >=
+          end_points[cur].start + end_points[cur].capacity)
+        end_points[cur].cur = end_points[cur].start;
+      bool is_write = uni(gen) < end_points[cur].ratio;
+      cur = (cur + 1) % end_points.size();
+      cur_count++;
+      return {ep, addr, 0, is_write};
+    }
+  };
+
+  class Random : public Interleaving {
+    size_t total_count;
+    size_t cur_count = 0;
+    std::normal_distribution<> norm;
+
+  public:
+    Random(size_t total_count, size_t block_size = 64)
+        : Interleaving(block_size), total_count(total_count) {
+      norm = std::normal_distribution<>(0.5, 0.5);
+    }
+    bool eof() { return cur_count == total_count; }
+    Request next() {
+      auto ep = end_points[cur].id;
+      auto seed = fmax(0, norm(gen));
+      seed = fmin(seed, 1);
+      auto addr =
+          Addr(floor(double(end_points[cur].capacity) / block_size * seed)) *
+              block_size +
+          end_points[cur].start;
+      bool is_write = uni(gen) < end_points[cur].ratio;
+      cur = (cur + 1) % end_points.size();
+      cur_count++;
+      return {ep, addr, 0, is_write};
+    }
+  };
+
   class FakeLRUCache {
     std::list<Addr> cache;
 
@@ -120,14 +229,21 @@ private:
   std::unordered_map<TopoID, std::unordered_map<std::string, double>> stats;
 
 public:
-  Requester(Simulation *sim, size_t q_capacity, size_t cache_capacity,
-            Tick cache_delay, Tick issue_delay, bool coherent,
-            size_t burst_size = 1, size_t block_size = 64,
-            Interleaving *interleave = nullptr, std::string name = "Host")
-      : Device(sim, name), end_points(interleave), q(q_capacity),
-        cache(cache_capacity, cache_delay), issue_delay(issue_delay),
-        coherent(coherent), burst_size(burst_size), block_size(block_size) {
-    ASSERT(end_points != nullptr, "No interleave policy");
+  Requester(Simulation *sim, const RequesterConfig &config,
+            std::string name = "Host")
+      : Device(sim, name), q(config.q_capacity),
+        cache(config.cache_capacity, config.cache_delay),
+        issue_delay(config.issue_delay), coherent(config.coherent),
+        burst_size(config.burst_size), block_size(config.block_size) {
+    if (config.interleave_type == "stream") {
+      end_points = new Stream{config.interleave_param};
+    } else if (config.interleave_type == "random") {
+      end_points = new Random{config.interleave_param};
+    } else if (config.interleave_type == "trace") {
+      end_points = new Trace{config.trace_file};
+    } else {
+      PANIC("Unknown interleave type: " + config.interleave_type);
+    }
   }
 
   Requester &add_end_point(TopoID id, Addr start, size_t capacity,
@@ -325,166 +441,7 @@ public:
 
   bool all_issued() { return end_points->eof(); }
   bool q_empty() { return q.empty(); }
-
-  /* ------------------------------ Access Type ----------------------------- */
-
-  class Trace : public Interleaving {
-  public:
-    struct TraceReq {
-      Addr addr;
-      bool is_write;
-      Tick tick;
-    };
-
-  private:
-    std::ifstream trace_file;
-    std::function<TraceReq(std::ifstream &)> decoder;
-
-  public:
-    Trace(
-        std::string trace_file,
-        std::function<TraceReq(std::ifstream &)> decoder =
-            [](std::ifstream &file) {
-              static std::unordered_set<std::string> write_types = {
-                  "W", "WR", "WRITE", "write", "P_MEM_WR", "BOFF"};
-              std::string type;
-              Addr addr;
-              Tick tick;
-              file >> std::hex >> addr >> std::dec >> type >> tick;
-              return TraceReq{addr, write_types.count(type) > 0, tick};
-            },
-        size_t block_size = 64)
-        : Interleaving(block_size), decoder(decoder) {
-      this->trace_file.open(trace_file);
-      ASSERT(this->trace_file.is_open(),
-             std::string{"Cannot open trace file"} + trace_file);
-    }
-    bool eof() { return trace_file.eof(); }
-    Request next() {
-      // TODO: flexible trace decoding
-      auto req = decoder(trace_file);
-      auto ep = end_points[cur].id;
-      req.addr = (req.addr % end_points[cur].capacity) + end_points[cur].start;
-      cur = (cur + 1) % end_points.size();
-      return {ep, req.addr, req.tick, req.is_write};
-    }
-  };
-
-  class Stream : public Interleaving {
-    size_t total_count;
-    size_t cur_count = 0;
-
-  public:
-    Stream(size_t total_count, size_t block_size = 64)
-        : Interleaving(block_size), total_count(total_count) {}
-    bool eof() { return cur_count == total_count; }
-    Request next() {
-      auto ep = end_points[cur].id;
-      auto addr = end_points[cur].cur;
-      end_points[cur].cur += block_size;
-      if (end_points[cur].cur >=
-          end_points[cur].start + end_points[cur].capacity)
-        end_points[cur].cur = end_points[cur].start;
-      bool is_write = uni(gen) < end_points[cur].ratio;
-      cur = (cur + 1) % end_points.size();
-      cur_count++;
-      return {ep, addr, 0, is_write};
-    }
-  };
-
-  class Random : public Interleaving {
-    size_t total_count;
-    size_t cur_count = 0;
-    std::normal_distribution<> norm;
-
-  public:
-    Random(size_t total_count, size_t block_size = 64)
-        : Interleaving(block_size), total_count(total_count) {
-      norm = std::normal_distribution<>(0.5, 0.5);
-    }
-    bool eof() { return cur_count == total_count; }
-    Request next() {
-      auto ep = end_points[cur].id;
-      auto seed = fmax(0, norm(gen));
-      seed = fmin(seed, 1);
-      auto addr =
-          Addr(floor(double(end_points[cur].capacity) / block_size * seed)) *
-              block_size +
-          end_points[cur].start;
-      bool is_write = uni(gen) < end_points[cur].ratio;
-      cur = (cur + 1) % end_points.size();
-      cur_count++;
-      return {ep, addr, 0, is_write};
-    }
-  };
 };
-
-class RequesterBuilder {
-private:
-  Simulation *sim_i;
-  size_t q_capacity_i;
-  size_t cache_capacity_i;
-  Tick cache_delay_i;
-  Tick issue_delay_i;
-  bool coherent_i;
-  size_t burst_size_i;
-  size_t block_size_i;
-  Requester::Interleaving *interleave_i;
-  std::string name_i;
-
-public:
-  RequesterBuilder()
-      : sim_i(nullptr), q_capacity_i(0), cache_capacity_i(0), cache_delay_i(0),
-        issue_delay_i(0), coherent_i(false), burst_size_i(1), block_size_i(64),
-        interleave_i(nullptr), name_i("Host") {}
-
-  RequesterBuilder &simulation(Simulation *sim) {
-    this->sim_i = sim;
-    return *this;
-  }
-  RequesterBuilder &q_capacity(size_t q_capacity) {
-    this->q_capacity_i = q_capacity;
-    return *this;
-  }
-  RequesterBuilder &cache_capacity(size_t cache_capacity) {
-    this->cache_capacity_i = cache_capacity;
-    return *this;
-  }
-  RequesterBuilder &cache_delay(Tick cache_delay) {
-    this->cache_delay_i = cache_delay;
-    return *this;
-  }
-  RequesterBuilder &issue_delay(Tick issue_delay) {
-    this->issue_delay_i = issue_delay;
-    return *this;
-  }
-  RequesterBuilder &coherent(bool coherent) {
-    this->coherent_i = coherent;
-    return *this;
-  }
-  RequesterBuilder &burst_size(size_t burst_size) {
-    this->burst_size_i = burst_size;
-    return *this;
-  }
-  RequesterBuilder &block_size(size_t block_size) {
-    this->block_size_i = block_size;
-    return *this;
-  }
-  RequesterBuilder &interleave(Requester::Interleaving *interleave) {
-    this->interleave_i = interleave;
-    return *this;
-  }
-  RequesterBuilder &name(std::string name) {
-    this->name_i = name;
-    return *this;
-  }
-  Requester build() {
-    return Requester(sim_i, q_capacity_i, cache_capacity_i, cache_delay_i,
-                     issue_delay_i, coherent_i, burst_size_i, block_size_i,
-                     interleave_i, name_i);
-  }
-};
-
 } // namespace xerxes
 
 #endif // XERXES_REQUESTER_HH

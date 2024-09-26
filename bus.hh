@@ -8,6 +8,22 @@
 #include <map>
 
 namespace xerxes {
+class DuplexBusConfig {
+public:
+  bool is_full = true;
+  Tick half_rev_time = 100;
+  Tick delay_per_T = 1; // 1ns ~ 1GT/s
+  size_t width = 32;
+  Tick framing_time = 20;
+  size_t frame_size = 256;
+};
+} // namespace xerxes
+
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::DuplexBusConfig, is_full,
+                                       half_rev_time, delay_per_T, width,
+                                       framing_time, frame_size);
+
+namespace xerxes {
 class DuplexBus : public Device {
 private:
   struct Route {
@@ -64,18 +80,16 @@ private:
   }
 
 public:
-  DuplexBus(Simulation *sim, bool is_full, Tick half_rev_time, Tick delay_per_T,
-            size_t width, Tick framing_time = 20, size_t frame_size = 256,
+  DuplexBus(Simulation *sim, const DuplexBusConfig &config,
             std::string name = "DuplexBus")
-      : Device(sim, name), is_full(is_full), half_rev_time(half_rev_time),
-        delay_per_T(delay_per_T), width(width / 8),
-        frame_size(frame_size), // width: bit -> byte
-        framing_time(framing_time) {
+      : Device(sim, name), is_full(config.is_full),
+        half_rev_time(config.half_rev_time), delay_per_T(config.delay_per_T),
+        width(config.width / 8), frame_size(config.frame_size),
+        framing_time(config.framing_time) {
     stats.insert(std::make_pair("Transfered_bytes", 0));
     stats.insert(std::make_pair("Transfered_payloads", 0));
     stats.insert(std::make_pair("Direction reverse count", 0));
     stats.insert(std::make_pair("Sent sub-packet count", 0));
-    stats.insert(std::make_pair("Sent non-sub-packet count", 0));
   }
 
   void transit() override {

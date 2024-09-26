@@ -3,6 +3,7 @@
 #define XERXES_DEVICE_HH
 
 #include "def.hh"
+#include "ext/toml.hpp"
 #include "simulation.hh"
 #include "system.hh"
 #include "topology.hh"

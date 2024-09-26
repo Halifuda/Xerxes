@@ -1,6 +1,11 @@
 #include "xerxes_standalone.hh"
+#include "bus.hh"
 #include "device.hh"
+#include "dramsim3_interface.hh"
+#include "requester.hh"
+#include "switch.hh"
 #include "utils.hh"
+#include <utility>
 
 #include "ext/toml.hpp"
 
@@ -55,71 +60,52 @@ Tick step() { return glb_engine.step(); }
 
 bool events_empty() { return glb_engine.empty(); }
 
-XerxesConfigs parse_basic_configs(std::string config_file_name) {
-  toml::value config;
-  try {
-    config = toml::parse(config_file_name);
-  } catch (const std::exception &e) {
-    PANIC(std::string{"Error: "} + e.what());
+#define BUILD_DEVICE(TypeName, ConfigType)                                     \
+  else if (type == #TypeName) {                                                \
+    auto config = toml::find_or<ConfigType>(data, pair.first, ConfigType{});   \
+    auto dev = new TypeName(glb_sim, config, pair.first);                      \
+    glb_sim->system()->add_dev(dev);                                           \
+    if (type == "Requester")                                                   \
+      ctx.requesters.push_back(dynamic_cast<Requester *>(dev));                \
+    else if (type == "DRAMsim3Interface")                                      \
+      ctx.mems.push_back(dynamic_cast<DRAMsim3Interface *>(dev));              \
+    auto id = dev->id();                                                       \
+    ctx.name_to_id[pair.first] = id;                                           \
+    XerxesLogger::debug() << "Add " #TypeName ": " << pair.first << "#" << id  \
+                          << std::endl;                                        \
   }
-  auto basic = XerxesConfigs{};
 
-  // General.
-  basic.ep_num = toml::find_or<int>(config, "ep_num", basic.ep_num);
-  basic.rw_ratio = toml::find_or<int>(config, "rw_ratio", basic.rw_ratio);
-  basic.max_clock = toml::find_or<int>(config, "max_clock", basic.max_clock);
-  basic.clock_granu =
-      toml::find_or<int>(config, "clock_granu", basic.clock_granu);
-  basic.log_name =
-      toml::find_or<std::string>(config, "log_name", basic.log_name);
-  // Requester.
-  basic.issue_delay =
-      toml::find_or<int>(config, "requester", "issue_delay", basic.issue_delay);
-  basic.burst_size =
-      toml::find_or<int>(config, "requester", "burst_size", basic.burst_size);
-  basic.q_capacity =
-      toml::find_or<int>(config, "requester", "q_capacity", basic.q_capacity);
-  basic.cache_capacity = toml::find_or<int>(
-      config, "requester", "cache_capacity", basic.cache_capacity);
-  basic.cache_delay =
-      toml::find_or<int>(config, "requester", "cache_delay", basic.cache_delay);
-  basic.coherent =
-      toml::find_or<bool>(config, "requester", "coherent", basic.coherent);
-  basic.interleave_type = toml::find_or<std::string>(
-      config, "requester", "interleave_type", basic.interleave_type);
-  basic.interleave_param = toml::find_or<int>(
-      config, "requester", "interleave_param", basic.interleave_param);
-  basic.trace_file = toml::find_or<std::string>(config, "requester",
-                                                "trace_file", basic.trace_file);
+XerxesContext parse_config(std::string config_file_name) {
+  ASSERT(glb_sim != nullptr, "Simulation is not initialized.");
+  XerxesContext ctx;
+  auto data = toml::parse(config_file_name);
+  ctx.general = toml::get<XerxesConfig>(data);
+  for (auto &pair : ctx.general.devices) {
+    auto type = pair.second;
+    if (type == "SthUknown") {
+      PANIC("Unknown device type: " + type);
+    }
+    BUILD_DEVICE(Requester, RequesterConfig)
+    BUILD_DEVICE(Switch, SwitchConfig)
+    BUILD_DEVICE(DuplexBus, DuplexBusConfig)
+    BUILD_DEVICE(DRAMsim3Interface, DRAMsim3InterfaceConfig)
+    else {
+      PANIC("Unknown device type: " + type);
+    }
+  }
+  for (auto &pair : ctx.general.edges) {
+    auto from = ctx.name_to_id[pair.first];
+    auto to = ctx.name_to_id[pair.second];
+    glb_sim->topology()->add_edge(from, to);
+  }
+  glb_sim->topology()->build_route();
 
-  // Bus.
-  basic.full_duplex =
-      toml::find_or<bool>(config, "bus", "full_duplex", basic.full_duplex);
-  basic.reverse_time =
-      toml::find_or<int>(config, "bus", "reverse_time", basic.reverse_time);
-  basic.bus_delay =
-      toml::find_or<int>(config, "bus", "bus_delay", basic.bus_delay);
-  basic.bus_width =
-      toml::find_or<int>(config, "bus", "bus_width", basic.bus_width);
-  basic.framing_time =
-      toml::find_or<int>(config, "bus", "framing_time", basic.framing_time);
-  basic.frame_size =
-      toml::find_or<int>(config, "bus", "frame_size", basic.frame_size);
-
-  // DRAM.
-  basic.tick_per_clock = toml::find_or<int>(config, "dram", "tick_per_clock",
-                                            basic.tick_per_clock);
-  basic.ctrl_proc_time = toml::find_or<int>(config, "dram", "ctrl_proc_time",
-                                            basic.ctrl_proc_time);
-  basic.start_addr =
-      toml::find_or<int>(config, "dram", "start_addr", basic.start_addr);
-  basic.dram_capacity =
-      toml::find_or<int>(config, "dram", "dram_capacity", basic.dram_capacity);
-  basic.dram_config = toml::find_or<std::string>(config, "dram", "dram_config",
-                                                 basic.dram_config);
-  basic.dram_log_dir =
-      toml::find_or<std::string>(config, "dram", "log_dir", basic.dram_log_dir);
-
-  return basic;
-};
+  for (auto &req : ctx.requesters) {
+    for (auto &mem : ctx.mems) {
+      req->add_end_point(mem->id(), mem->start_addr(), mem->capacity(),
+                         mem->rw_ratio());
+    }
+  }
+  return ctx;
+}
 } // namespace xerxes

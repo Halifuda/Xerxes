@@ -7,6 +7,15 @@
 #include <unordered_set>
 
 namespace xerxes {
+class SwitchConfig {
+public:
+  Tick delay = 1;
+};
+} // namespace xerxes
+
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::SwitchConfig, delay);
+
+namespace xerxes {
 class Switch : public Device {
 private:
   struct Port {
@@ -78,8 +87,9 @@ private:
   }
 
 public:
-  Switch(Simulation *sim, Tick delay, std::string name = "Switch")
-      : Device(sim, name), delay(delay) {}
+  Switch(Simulation *sim, const SwitchConfig &config,
+         std::string name = "Switch")
+      : Device(sim, name), delay(config.delay) {}
 
   void add_upstream(TopoID id, Tick delay) {
     upstreams.insert({id, {0, delay}});

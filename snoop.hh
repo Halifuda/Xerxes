@@ -9,8 +9,20 @@
 #include <utility>
 
 namespace xerxes {
-class Snoop : public Device {
+class SnoopConfig {
 public:
+  size_t line_num = 1024;
+  size_t assoc = 8;
+  size_t max_burst_inv = 8;
+  std::string eviction = "LRU";
+};
+} // namespace xerxes
+
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::SnoopConfig, line_num, assoc,
+                                       max_burst_inv, eviction);
+
+namespace xerxes {
+class Snoop : public Device {
   class SnoopEviction {
   protected:
     size_t size;
@@ -34,13 +46,220 @@ public:
     virtual ssize_t find_victim(size_t set_i, bool do_evict) = 0;
   };
 
-  class FIFO;
-  class LIFO;
-  class LRU;
-  class MRU;
-  class LFI;
+  class FIFO : public SnoopEviction {
+  protected:
+    std::vector<std::list<size_t>> queues;
 
-private:
+  public:
+    FIFO() : SnoopEviction() {}
+
+    void init(size_t size, size_t assoc) override {
+      SnoopEviction::init(size, assoc);
+      queues.resize(setn, std::list<size_t>{});
+    }
+
+    void on_invalidate(Addr addr, size_t set_i, size_t way_i) override {
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (*it == way_i) {
+          q.erase(it);
+          return;
+        }
+      }
+    }
+
+    void on_insert(Addr addr, size_t set_i, size_t way_i) override {
+      bool exist = false;
+      for (auto &way : queues[set_i]) {
+        if (way == way_i) {
+          exist = true;
+          break;
+        }
+      }
+      if (!exist) {
+        if (queues[set_i].size() == assoc) {
+          queues[set_i].pop_back();
+        }
+        queues[set_i].push_front(way_i);
+      }
+    }
+
+    ssize_t find_victim(size_t set_i, bool do_evict) override {
+      if (queues[set_i].empty())
+        return -1;
+      auto victim = queues[set_i].back();
+      if (do_evict)
+        queues[set_i].pop_back();
+      return victim;
+    }
+  };
+
+  class LIFO : public FIFO {
+  public:
+    LIFO() : FIFO() {}
+    /*
+      on_insert() and on_update() are the same as FIFO.
+      The front of the queue is the last inserted way.
+    */
+    ssize_t find_victim(size_t set_i, bool do_evict) override {
+      if (queues[set_i].empty())
+        return -1;
+      auto victim = queues[set_i].front();
+      if (do_evict)
+        queues[set_i].pop_front();
+      return victim;
+    }
+  };
+
+  class LRU : public FIFO {
+  public:
+    LRU() : FIFO() {}
+
+    /*
+      When update queue on hit, the front of the queue is the most recently
+      used way, and the back of the queue is the least recently used way.
+    */
+
+    void on_hit(Addr addr, size_t set_i, size_t way_i) override {
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (*it == way_i) {
+          q.erase(it);
+          q.push_front(way_i);
+          return;
+        }
+      }
+    }
+
+    void on_insert(Addr addr, size_t set_i, size_t way_i) override {
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (*it == way_i) {
+          q.erase(it);
+          break;
+        }
+      }
+      if (queues[set_i].size() == assoc) {
+        queues[set_i].pop_back();
+      }
+      queues[set_i].push_front(way_i);
+    }
+
+    void on_update(Addr addr, size_t set_i, size_t way_i) override {
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (*it == way_i) {
+          q.erase(it);
+          break;
+        }
+      }
+      q.push_front(way_i);
+    }
+  };
+
+  class MRU : public LRU {
+  public:
+    MRU() : LRU() {}
+
+    ssize_t find_victim(size_t set_i, bool do_evict) override {
+      if (queues[set_i].empty())
+        return -1;
+      auto victim = queues[set_i].front();
+      if (do_evict)
+        queues[set_i].pop_front();
+      return victim;
+    }
+  };
+
+  class LFI : public SnoopEviction {
+  protected:
+    struct Entry {
+      Addr addr;
+      size_t way_i;
+    };
+    std::vector<std::list<Entry>> queues;
+    std::unordered_map<Addr, size_t> insert_cnt;
+
+  public:
+    LFI() : SnoopEviction() {}
+
+    void init(size_t size, size_t assoc) override {
+      SnoopEviction::init(size, assoc);
+      queues.resize(setn, std::list<Entry>{});
+    }
+
+    void on_invalidate(Addr addr, size_t set_i, size_t way_i) override {
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (it->way_i == way_i) {
+          q.erase(it);
+          return;
+        }
+      }
+    }
+
+    void on_insert(Addr addr, size_t set_i, size_t way_i) override {
+      if (insert_cnt.find(addr) == insert_cnt.end()) {
+        insert_cnt[addr] = 0;
+      }
+      insert_cnt[addr] += 1;
+      bool exist = false;
+      for (auto &e : queues[set_i]) {
+        if (e.way_i == way_i) {
+          exist = true;
+          break;
+        }
+      }
+      if (!exist) {
+        if (queues[set_i].size() == assoc) {
+          queues[set_i].pop_back();
+        }
+        queues[set_i].push_front({addr, way_i});
+      }
+    }
+
+    void on_update(Addr addr, size_t set_i, size_t way_i) override {
+      if (insert_cnt.find(addr) == insert_cnt.end()) {
+        insert_cnt[addr] = 0;
+      }
+      insert_cnt[addr] += 1;
+      auto &q = queues[set_i];
+      for (auto it = q.begin(); it != q.end(); ++it) {
+        if (it->way_i == way_i) {
+          q.erase(it);
+          break;
+        }
+      }
+      q.push_front({addr, way_i});
+    }
+
+    ssize_t find_victim(size_t set_i, bool do_evict) override {
+      if (queues[set_i].empty())
+        return -1;
+      size_t ecnt = INT_MAX;
+      size_t victim = -1;
+      for (auto &e : queues[set_i]) {
+        size_t k = 0;
+        if (insert_cnt.find(e.addr) != insert_cnt.end())
+          k = insert_cnt[e.addr];
+        if (k < ecnt) {
+          ecnt = k;
+          victim = e.way_i;
+        }
+      }
+      if (do_evict) {
+        auto &q = queues[set_i];
+        for (auto it = q.begin(); it != q.end(); ++it) {
+          if (it->way_i == victim) {
+            q.erase(it);
+            break;
+          }
+        }
+      }
+      return victim;
+    }
+  };
+
   size_t line_num;
   size_t assoc;
   size_t set_num;
@@ -318,19 +537,28 @@ private:
   }
 
 public:
-  Snoop(Simulation *sim, size_t line_num, size_t assoc, size_t max_burst_inv,
-        SnoopEviction *eviction = nullptr, bool log_inv = false,
-        std::string name = "Snoop")
-      : Device(sim, name), line_num(line_num), assoc(assoc),
-        set_num(line_num / assoc), max_burst_inv(max_burst_inv),
-        eviction(eviction), log_inv(log_inv) {
+  Snoop(Simulation *sim, const SnoopConfig &config, std::string name = "Snoop")
+      : Device(sim, name), line_num(config.line_num), assoc(config.assoc),
+        set_num(config.line_num / config.assoc),
+        max_burst_inv(config.max_burst_inv), log_inv(false) {
     ASSERT(line_num % assoc == 0, "snoop: size % assoc != 0");
     cache.resize(set_num);
     for (auto &c : cache)
       c.resize(assoc, Line{0, false});
     waiting.resize(set_num);
-    if (eviction)
-      eviction->init(this->line_num, assoc);
+    if (config.eviction == "FIFO") {
+      eviction = new FIFO{};
+    } else if (config.eviction == "LIFO") {
+      eviction = new LIFO{};
+    } else if (config.eviction == "LRU") {
+      eviction = new LRU{};
+    } else if (config.eviction == "MRU") {
+      eviction = new MRU{};
+    } else if (config.eviction == "LFI") {
+      eviction = new LFI{};
+    } else {
+      PANIC("Unknown eviction policy: " + config.eviction);
+    }
   }
 
   ~Snoop() {}
@@ -385,220 +613,6 @@ public:
     }
     return sum / host_trig_conflict_count.size();
   }
-
-  class FIFO : public SnoopEviction {
-  protected:
-    std::vector<std::list<size_t>> queues;
-
-  public:
-    FIFO() : SnoopEviction() {}
-
-    void init(size_t size, size_t assoc) override {
-      SnoopEviction::init(size, assoc);
-      queues.resize(setn, std::list<size_t>{});
-    }
-
-    void on_invalidate(Addr addr, size_t set_i, size_t way_i) override {
-      auto &q = queues[set_i];
-      for (auto it = q.begin(); it != q.end(); ++it) {
-        if (*it == way_i) {
-          q.erase(it);
-          return;
-        }
-      }
-    }
-
-    void on_insert(Addr addr, size_t set_i, size_t way_i) override {
-      bool exist = false;
-      for (auto &way : queues[set_i]) {
-        if (way == way_i) {
-          exist = true;
-          break;
-        }
-      }
-      if (!exist) {
-        if (queues[set_i].size() == assoc) {
-          queues[set_i].pop_back();
-        }
-        queues[set_i].push_front(way_i);
-      }
-    }
-
-    ssize_t find_victim(size_t set_i, bool do_evict) override {
-      if (queues[set_i].empty())
-        return -1;
-      auto victim = queues[set_i].back();
-      if (do_evict)
-        queues[set_i].pop_back();
-      return victim;
-    }
-  };
-
-  class LIFO : public FIFO {
-  public:
-    LIFO() : FIFO() {}
-    /*
-      on_insert() and on_update() are the same as FIFO.
-      The front of the queue is the last inserted way.
-    */
-    ssize_t find_victim(size_t set_i, bool do_evict) override {
-      if (queues[set_i].empty())
-        return -1;
-      auto victim = queues[set_i].front();
-      if (do_evict)
-        queues[set_i].pop_front();
-      return victim;
-    }
-  };
-
-  class LRU : public FIFO {
-  public:
-    LRU() : FIFO() {}
-
-    /*
-      When update queue on hit, the front of the queue is the most recently
-      used way, and the back of the queue is the least recently used way.
-    */
-
-    void on_hit(Addr addr, size_t set_i, size_t way_i) override {
-      auto &q = queues[set_i];
-      for (auto it = q.begin(); it != q.end(); ++it) {
-        if (*it == way_i) {
-          q.erase(it);
-          q.push_front(way_i);
-          return;
-        }
-      }
-    }
-
-    void on_insert(Addr addr, size_t set_i, size_t way_i) override {
-      auto &q = queues[set_i];
-      for (auto it = q.begin(); it != q.end(); ++it) {
-        if (*it == way_i) {
-          q.erase(it);
-          break;
-        }
-      }
-      if (queues[set_i].size() == assoc) {
-        queues[set_i].pop_back();
-      }
-      queues[set_i].push_front(way_i);
-    }
-
-    void on_update(Addr addr, size_t set_i, size_t way_i) override {
-      auto &q = queues[set_i];
-      for (auto it = q.begin(); it != q.end(); ++it) {
-        if (*it == way_i) {
-          q.erase(it);
-          break;
-        }
-      }
-      q.push_front(way_i);
-    }
-  };
-
-  class MRU : public LRU {
-  public:
-    MRU() : LRU() {}
-
-    ssize_t find_victim(size_t set_i, bool do_evict) override {
-      if (queues[set_i].empty())
-        return -1;
-      auto victim = queues[set_i].front();
-      if (do_evict)
-        queues[set_i].pop_front();
-      return victim;
-    }
-  };
-
-  class LFI : public SnoopEviction {
-  protected:
-    struct Entry {
-      Addr addr;
-      size_t way_i;
-    };
-    std::vector<std::list<Entry>> queues;
-    std::unordered_map<Addr, size_t> insert_cnt;
-
-  public:
-    LFI() : SnoopEviction() {}
-
-    void init(size_t size, size_t assoc) override {
-      SnoopEviction::init(size, assoc);
-      queues.resize(setn, std::list<Entry>{});
-    }
-
-    void on_invalidate(Addr addr, size_t set_i, size_t way_i) override {
-      auto &q = queues[set_i];
-      for (auto it = q.begin(); it != q.end(); ++it) {
-        if (it->way_i == way_i) {
-          q.erase(it);
-          return;
-        }
-      }
-    }
-
-    void on_insert(Addr addr, size_t set_i, size_t way_i) override {
-      if (insert_cnt.find(addr) == insert_cnt.end()) {
-        insert_cnt[addr] = 0;
-      }
-      insert_cnt[addr] += 1;
-      bool exist = false;
-      for (auto &e : queues[set_i]) {
-        if (e.way_i == way_i) {
-          exist = true;
-          break;
-        }
-      }
-      if (!exist) {
-        if (queues[set_i].size() == assoc) {
-          queues[set_i].pop_back();
-        }
-        queues[set_i].push_front({addr, way_i});
-      }
-    }
-
-    void on_update(Addr addr, size_t set_i, size_t way_i) override {
-      if (insert_cnt.find(addr) == insert_cnt.end()) {
-        insert_cnt[addr] = 0;
-      }
-      insert_cnt[addr] += 1;
-      auto &q = queues[set_i];
-      for (auto it = q.begin(); it != q.end(); ++it) {
-        if (it->way_i == way_i) {
-          q.erase(it);
-          break;
-        }
-      }
-      q.push_front({addr, way_i});
-    }
-
-    ssize_t find_victim(size_t set_i, bool do_evict) override {
-      if (queues[set_i].empty())
-        return -1;
-      size_t ecnt = INT_MAX;
-      size_t victim = -1;
-      for (auto &e : queues[set_i]) {
-        size_t k = 0;
-        if (insert_cnt.find(e.addr) != insert_cnt.end())
-          k = insert_cnt[e.addr];
-        if (k < ecnt) {
-          ecnt = k;
-          victim = e.way_i;
-        }
-      }
-      if (do_evict) {
-        auto &q = queues[set_i];
-        for (auto it = q.begin(); it != q.end(); ++it) {
-          if (it->way_i == victim) {
-            q.erase(it);
-            break;
-          }
-        }
-      }
-      return victim;
-    }
-  };
 };
 
 } // namespace xerxes

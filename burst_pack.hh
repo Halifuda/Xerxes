@@ -7,6 +7,20 @@
 #include <unordered_set>
 
 namespace xerxes {
+class PackingConfig {
+public:
+  size_t packaging_num = 1;
+};
+
+class BurstHandlerConfig {
+public:
+  // TODO
+};
+
+} // namespace xerxes
+
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::PackingConfig, packaging_num);
+namespace xerxes {
 class Packing : public Device {
 private:
   struct Package {
@@ -20,8 +34,8 @@ private:
   size_t cur_pkg_id = 0;
 
 public:
-  Packing(Simulation *sim, size_t packaging_num, std::string name = "Packaging")
-      : Device(sim, name), packaging_num(packaging_num) {}
+  Packing(Simulation *sim, PackingConfig config, std::string name = "Packing")
+      : Device(sim, name), packaging_num(config.packaging_num) {}
 
   void add_upstream(TopoID host) { upstreams.insert(host); }
 
@@ -149,7 +163,6 @@ public:
     }
   }
 };
-
 } // namespace xerxes
 
 #endif // XERXES_BURST_PACK_HH
