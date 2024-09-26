@@ -10,24 +10,10 @@ using namespace std;
 
 int main() {
   auto sim = xerxes::Simulation{};
-  auto fout = std::fstream("output/try.csv", std::ios::out);
-  fout << "id,type,memid,addr,send,arrive,bus_queuing,bus_time,dram_queuing,"
-          "dram_time,total_time"
-       << std::endl;
-  auto pkt_logger = [&](const xerxes::Packet &pkt) {
-    xerxes::XerxesLogger::info()
-        << pkt.id << "," << xerxes::TypeName::of(pkt.type) << "," << pkt.src
-        << "," << std::hex << pkt.addr << std::dec << "," << pkt.sent << ","
-        << pkt.arrive << ","
-        << pkt.get_stat(xerxes::NormalStatType::BUS_QUEUE_DELAY) << ","
-        << pkt.get_stat(xerxes::NormalStatType::BUS_TIME) << ","
-        << pkt.get_stat(xerxes::NormalStatType::DRAM_INTERFACE_QUEUING_DELAY)
-        << "," << pkt.get_stat(xerxes::NormalStatType::DRAM_TIME) << ","
-        << pkt.arrive - pkt.sent << std::endl;
-    return 0;
-  };
-  xerxes::global_init(&sim, fout, xerxes::XerxesLogLevel::INFO, pkt_logger);
+  xerxes::init_sim(&sim);
   auto ctx = xerxes::parse_config("configs/test.toml");
+  auto fout = std::fstream(ctx.general.log_name, std::ios::out);
+  xerxes::set_pkt_logger(fout, xerxes::str_to_log_level(ctx.general.log_level));
 
   auto &config = ctx.general;
   auto &requesters = ctx.requesters;

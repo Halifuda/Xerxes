@@ -14,6 +14,20 @@ enum XerxesLogLevel {
   ERROR = 5
 };
 
+inline XerxesLogLevel str_to_log_level(const std::string &str) {
+  if (str == "INFO")
+    return INFO;
+  if (str == "TEMP")
+    return TEMP;
+  if (str == "DEBUG")
+    return DEBUG;
+  if (str == "WARNING")
+    return WARNING;
+  if (str == "ERROR")
+    return ERROR;
+  return NONE;
+}
+
 class XerxesLogger {
 private:
   XerxesLogLevel glb_level;

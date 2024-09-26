@@ -1,5 +1,6 @@
 #include "xerxes_standalone.hh"
 #include "bus.hh"
+#include "def.hh"
 #include "device.hh"
 #include "dramsim3_interface.hh"
 #include "requester.hh"
@@ -12,9 +13,36 @@
 namespace xerxes {
 Simulation *glb_sim = nullptr;
 
-void global_init(Simulation *sim, std::ostream &os, XerxesLogLevel level,
-                 Packet::XerxesLoggerFunc pkt_logger) {
-  glb_sim = sim;
+void default_logger(const Packet &pkt) {
+  static bool first = true;
+  if (first) {
+    first = false;
+    XerxesLogger::info()
+        << "id,type,memid,addr,send,arrive,bus_queuing,bus_time,"
+           "switch_queuing,switch_time,snoop_evict,host_inv,"
+           "dram_queuing,dram_time,total_time"
+        << std::endl;
+  }
+  XerxesLogger::info() << pkt.id << "," << TypeName::of(pkt.type) << ","
+                       << pkt.src << "," << std::hex << pkt.addr << std::dec
+                       << "," << pkt.sent << "," << pkt.arrive << ","
+                       << pkt.get_stat(NormalStatType::BUS_QUEUE_DELAY) << ","
+                       << pkt.get_stat(NormalStatType::BUS_TIME) << ","
+                       << pkt.get_stat(NormalStatType::SWITCH_QUEUE_DELAY)
+                       << "," << pkt.get_stat(NormalStatType::SWITCH_TIME)
+                       << "," << pkt.get_stat(NormalStatType::SNOOP_EVICT_DELAY)
+                       << "," << pkt.get_stat(NormalStatType::HOST_INV_DELAY)
+                       << ","
+                       << pkt.get_stat(
+                              NormalStatType::DRAM_INTERFACE_QUEUING_DELAY)
+                       << "," << pkt.get_stat(NormalStatType::DRAM_TIME) << ","
+                       << pkt.arrive - pkt.sent << std::endl;
+}
+
+void init_sim(Simulation *sim) { glb_sim = sim; }
+
+void set_pkt_logger(std::ostream &os, XerxesLogLevel level,
+                    Packet::XerxesLoggerFunc pkt_logger) {
   XerxesLogger::set(os, level);
   Packet::pkt_logger(true, pkt_logger);
 }

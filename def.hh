@@ -168,6 +168,8 @@ struct Packet {
     return stats.find(key) != stats.end();
   }
   double get_stat(NormalStatType key) const {
+    if (!has_stat(key))
+      return 0;
     auto &stats = PktStatsTable::get()[id];
     return stats[key];
   }

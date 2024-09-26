@@ -235,6 +235,8 @@ public:
         cache(config.cache_capacity, config.cache_delay),
         issue_delay(config.issue_delay), coherent(config.coherent),
         burst_size(config.burst_size), block_size(config.block_size) {
+    XerxesLogger::debug() << "Interleave param " << config.interleave_param
+                          << std::endl;
     if (config.interleave_type == "stream") {
       end_points = new Stream{config.interleave_param};
     } else if (config.interleave_type == "random") {
@@ -383,8 +385,8 @@ public:
         stats[ep]["Average latency"] += cache.delay;
         stats[-1]["Cache hit count"] += 1;
 
-        XerxesLogger::info() << "Cache hit: " << addr << "," << cur << ","
-                             << cur + cache.delay << std::endl;
+        XerxesLogger::debug() << name() << " cache hit: " << addr << "," << cur
+                              << "," << cur + cache.delay << std::endl;
         cur += cache.delay;
         return true;
       }
@@ -403,6 +405,8 @@ public:
               .burst(burst_size)
               .type(type)
               .build();
+      XerxesLogger::debug() << name() << " issue packet " << pkt.id << " to "
+                            << ep << " at " << cur << std::endl;
       q.push(pkt);
       send_pkt(pkt);
       cur_cnt++;
