@@ -3,15 +3,29 @@
 #include "requester.hh"
 #include "xerxes_standalone.hh"
 
+#include <chrono>
 #include <fstream>
 #include <iostream>
 
 using namespace std;
 
-int main() {
+int main(int argc, char *argv[]) {
   auto sim = xerxes::Simulation{};
   xerxes::init_sim(&sim);
-  auto ctx = xerxes::parse_config("configs/test.toml");
+  std::string config_file = "";
+  if (argc > 1)
+    config_file = argv[1];
+  else
+    config_file = "configs/test.toml";
+
+  // check if the file exists
+  std::ifstream f(config_file);
+  if (!f.good()) {
+    std::cerr << "File " << config_file << " does not exist." << std::endl;
+    return 1;
+  }
+  std::cout << "Config file: " << config_file << std::endl;
+  auto ctx = xerxes::parse_config(config_file);
   auto fout = std::fstream(ctx.general.log_name, std::ios::out);
   xerxes::set_pkt_logger(fout, xerxes::str_to_log_level(ctx.general.log_level));
 
@@ -56,6 +70,7 @@ int main() {
   };
 
   // Simulation.
+  auto start = std::chrono::high_resolution_clock::now();
   while (clock_cnt < config.max_clock) {
     if (check_all_issued()) {
       break;
@@ -77,7 +92,18 @@ int main() {
     if (check_all_empty()) {
       break;
     }
+    if (clock_cnt % 10000 == 0) {
+      auto end = std::chrono::high_resolution_clock::now();
+      auto duration =
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+      std::cout << "Clock: " << clock_cnt << " Duration: " << duration.count()
+                << " ms" << std::endl;
+    }
   }
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration =
+      std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
   std::cout << "Simulation finished." << std::endl;
+  std::cout << "Duration: " << duration.count() << " ms" << std::endl;
   return 0;
 }
