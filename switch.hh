@@ -1,8 +1,19 @@
 #pragma once
-#include "def.hpp"
-#include "device.hpp"
+#ifndef XERXES_SWITCH_HH
+#define XERXES_SWITCH_HH
+
+#include "device.hh"
 
 #include <unordered_set>
+
+namespace xerxes {
+class SwitchConfig {
+public:
+  Tick delay = 1;
+};
+} // namespace xerxes
+
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::SwitchConfig, delay);
 
 namespace xerxes {
 class Switch : public Device {
@@ -76,8 +87,9 @@ private:
   }
 
 public:
-  Switch(Topology *topology, Tick delay, std::string name = "Switch")
-      : Device(topology, name), delay(delay) {}
+  Switch(Simulation *sim, const SwitchConfig &config,
+         std::string name = "Switch")
+      : Device(sim, name), delay(config.delay) {}
 
   void add_upstream(TopoID id, Tick delay) {
     upstreams.insert({id, {0, delay}});
@@ -130,9 +142,9 @@ private:
   std::unordered_set<PktID> wt;
 
 public:
-  DeviceBuffer(Topology *topology, size_t capacity,
+  DeviceBuffer(Simulation *sim, size_t capacity,
                std::string name = "DeviceBuffer")
-      : Device(topology, name), capacity(capacity) {}
+      : Device(sim, name), capacity(capacity) {}
 
   void transit() override {
     auto pkt = receive_pkt();
@@ -165,3 +177,5 @@ public:
   }
 };
 } // namespace xerxes
+
+#endif // XERXES_SWITCH_HH

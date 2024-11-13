@@ -2,3 +2,5 @@
 build/
 debug/
 output/
+.cache/
+configs/mkcfg/__pycache__/

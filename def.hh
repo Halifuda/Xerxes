@@ -1,5 +1,8 @@
 #pragma once
-#include "utils.hpp"
+#ifndef XERXES_DEF_HH
+#define XERXES_DEF_HH
+
+#include "utils.hh"
 
 #include <climits>
 #include <cstddef>
@@ -14,6 +17,9 @@ typedef uint64_t Addr;
 typedef int64_t TopoID;
 typedef int64_t PktID;
 typedef uint64_t Tick;
+class Topology;
+class System;
+class Simulation;
 
 typedef enum {
   RD,     /* Read (coherent) */
@@ -162,6 +168,8 @@ struct Packet {
     return stats.find(key) != stats.end();
   }
   double get_stat(NormalStatType key) const {
+    if (!has_stat(key))
+      return 0;
     auto &stats = PktStatsTable::get()[id];
     return stats[key];
   }
@@ -176,17 +184,17 @@ struct Packet {
    */
   void delta_stat(NormalStatType key, double value) {
     auto &stats = PktStatsTable::get()[id];
-    Logger::debug() << "delta stat \"" << StatKeys::key_name(key)
-                    << "\" = " << value << std::endl;
+    XerxesLogger::debug() << "delta stat \"" << StatKeys::key_name(key)
+                          << "\" = " << value << std::endl;
     if (has_stat(key))
       stats[key] += value;
     else
       stats.insert(std::make_pair(key, value));
   }
-  typedef std::function<void(const Packet &)> LoggerFunc;
-  static LoggerFunc &
-  pkt_logger(bool set = false, LoggerFunc logger = [](const Packet &) {}) {
-    static LoggerFunc f = [](const Packet &) {};
+  typedef std::function<void(const Packet &)> XerxesLoggerFunc;
+  static XerxesLoggerFunc &pkt_logger(
+      bool set = false, XerxesLoggerFunc logger = [](const Packet &) {}) {
+    static XerxesLoggerFunc f = [](const Packet &) {};
     if (set)
       f = logger;
     return f;
@@ -289,34 +297,36 @@ public:
   Timeline() { scopes[LONG_LONG_MAX] = Scope{0, LONG_LONG_MAX}; }
 
   Tick transfer_time(Tick arrive, Tick delay) {
-    Logger::debug() << "Timeline transfer time: " << arrive << ", delay "
-                    << delay << std::endl;
+    XerxesLogger::debug() << "Timeline transfer time: " << arrive << ", delay "
+                          << delay << std::endl;
     auto it = scopes.lower_bound(arrive);
     while (it->second.end - std::max(it->second.start, arrive) < delay &&
            it != scopes.end()) {
-      Logger::debug() << "Skip scope " << it->second.start << "-"
-                      << it->second.end << std::endl;
+      XerxesLogger::debug() << "Skip scope " << it->second.start << "-"
+                            << it->second.end << std::endl;
       it++;
     }
     ASSERT(it != scopes.end(), "Cannot find scope");
-    Logger::debug() << "Use scope " << it->second.start << "-" << it->second.end
-                    << std::endl;
+    XerxesLogger::debug() << "Use scope " << it->second.start << "-"
+                          << it->second.end << std::endl;
     auto &scope = it->second;
     auto left = Scope{scope.start, std::max(scope.start, arrive)};
     auto right = Scope{std::max(scope.start, arrive) + delay, scope.end};
     auto ret = std::max(scope.start, arrive);
     scopes.erase(it);
     if (left.len() > 0) {
-      Logger::debug() << "Insert new scope " << left.start << "-" << left.end
-                      << std::endl;
+      XerxesLogger::debug()
+          << "Insert new scope " << left.start << "-" << left.end << std::endl;
       scopes[left.end] = left;
     }
     if (right.len() > 0) {
-      Logger::debug() << "Insert new scope " << right.start << "-" << right.end
-                      << std::endl;
+      XerxesLogger::debug() << "Insert new scope " << right.start << "-"
+                            << right.end << std::endl;
       scopes[right.end] = right;
     }
     return ret;
   }
 };
 } // namespace xerxes
+
+#endif // XERXES_DEF_HH
