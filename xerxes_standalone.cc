@@ -4,6 +4,7 @@
 #include "device.hh"
 #include "dramsim3_interface.hh"
 #include "requester.hh"
+#include "snoop.hh"
 #include "switch.hh"
 #include "utils.hh"
 #include <utility>
@@ -117,6 +118,7 @@ XerxesContext parse_config(std::string config_file_name) {
     BUILD_DEVICE(Switch, SwitchConfig)
     BUILD_DEVICE(DuplexBus, DuplexBusConfig)
     BUILD_DEVICE(DRAMsim3Interface, DRAMsim3InterfaceConfig)
+    BUILD_DEVICE(Snoop, SnoopConfig)
     else {
       PANIC("Unknown device type: " + type);
     }

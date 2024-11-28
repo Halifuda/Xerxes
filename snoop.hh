@@ -14,6 +14,7 @@ public:
   size_t line_num = 1024;
   size_t assoc = 8;
   size_t max_burst_inv = 8;
+  std::vector<std::pair<Addr, Addr>> ranges;
   std::string eviction = "LRU";
 };
 } // namespace xerxes
@@ -284,6 +285,7 @@ class Snoop : public Device {
 
   std::vector<std::vector<Line>> cache;
   std::vector<std::map<PktID, Packet>> waiting;
+  std::vector<std::pair<Addr, Addr>> ranges;
 
   std::unordered_map<TopoID, double> host_trig_conflict_count;
   std::unordered_map<size_t, double> burst_inv_size_count;
@@ -506,8 +508,16 @@ class Snoop : public Device {
     }
   }
 
+  bool in_range(Addr addr) {
+    for (auto &range : ranges) {
+      if (addr >= range.first && addr <= range.second)
+        return true;
+    }
+    return false;
+  }
+
   void filter(Packet pkt) {
-    if (pkt.is_coherent() && !pkt.is_rsp) {
+    if (pkt.is_coherent() && !pkt.is_rsp && in_range(pkt.addr)) {
       coherent_request(pkt);
     } else if (pkt.type == PacketType::INV && pkt.is_rsp && pkt.dst == self) {
       invalidate_response(pkt);
@@ -546,6 +556,7 @@ public:
     for (auto &c : cache)
       c.resize(assoc, Line{0, false});
     waiting.resize(set_num);
+    ranges = config.ranges;
     if (config.eviction == "FIFO") {
       eviction = new FIFO{};
     } else if (config.eviction == "LIFO") {
@@ -559,6 +570,7 @@ public:
     } else {
       PANIC("Unknown eviction policy: " + config.eviction);
     }
+    eviction->init(line_num, assoc);
   }
 
   ~Snoop() {}

@@ -3,7 +3,7 @@ class Config:
         self.max_clock = 3000000
         self.clock_granu = 1
         self.log_level = "INFO"
-        self.log_name = "output/gcc.csv"
+        self.log_name = "output/default.csv"
         self.devices = {}
         self.connections = []
 

@@ -83,6 +83,7 @@ class Snoop(Device):
             "line_num": 1024,
             "assoc": 8,
             "max_burst_inv": 8,
+            "ranges": [0, 1 << 30],
             "eviction": "LRU",
         }
 
