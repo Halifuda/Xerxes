@@ -70,7 +70,7 @@ class DRAMsim3Interface(Device):
             "process_time": 40,
             "start": 0,
             "capacity": 1 << 30,
-            "rw_ratio": 0.5,
+            "wr_ratio": 0.5,
             "config_file": "DRAMsim3/configs/DDR4_8Gb_x8_3200.ini",
             "output_dir": "output",
         }
@@ -83,7 +83,7 @@ class Snoop(Device):
             "line_num": 1024,
             "assoc": 8,
             "max_burst_inv": 8,
-            "ranges": [0, 1 << 30],
+            "ranges": [[0, 1 << 30]],
             "eviction": "LRU",
         }
 

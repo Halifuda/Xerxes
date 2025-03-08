@@ -20,7 +20,7 @@ public:
 } // namespace xerxes
 
 TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::SnoopConfig, line_num, assoc,
-                                       max_burst_inv, eviction);
+                                       max_burst_inv, ranges, eviction);
 
 namespace xerxes {
 class Snoop : public Device {
@@ -517,6 +517,12 @@ class Snoop : public Device {
   }
 
   void filter(Packet pkt) {
+    XerxesLogger::debug() << "filter " << pkt.is_coherent() << " " << pkt.is_rsp
+                          << " " << in_range(pkt.addr) << std::endl;
+    for (auto &range : ranges) {
+      XerxesLogger::debug()
+          << "range " << range.first << " " << range.second << std::endl;
+    }
     if (pkt.is_coherent() && !pkt.is_rsp && in_range(pkt.addr)) {
       coherent_request(pkt);
     } else if (pkt.type == PacketType::INV && pkt.is_rsp && pkt.dst == self) {

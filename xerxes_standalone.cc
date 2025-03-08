@@ -133,7 +133,7 @@ XerxesContext parse_config(std::string config_file_name) {
   for (auto &req : ctx.requesters) {
     for (auto &mem : ctx.mems) {
       req->add_end_point(mem->id(), mem->start_addr(), mem->capacity(),
-                         mem->rw_ratio());
+                         mem->wr_ratio());
     }
   }
   return ctx;
