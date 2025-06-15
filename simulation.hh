@@ -6,15 +6,15 @@
 
 namespace xerxes {
 class Simulation {
-  Topology *p_topology;
-  System *p_system;
+    Topology *p_topology;
+    System *p_system;
 
-public:
-  Simulation();
-  ~Simulation();
+  public:
+    Simulation();
+    ~Simulation();
 
-  Topology *topology() { return p_topology; }
-  System *system() { return p_system; }
+    Topology *topology() { return p_topology; }
+    System *system() { return p_system; }
 };
 } // namespace xerxes
 

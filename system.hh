@@ -6,11 +6,11 @@
 
 namespace xerxes {
 class System {
-  std::map<TopoID, Device *> devices;
+    std::map<TopoID, Device *> devices;
 
-public:
-  System *add_dev(Device *device);
-  Device *find_dev(TopoID id);
+  public:
+    System *add_dev(Device *device);
+    Device *find_dev(TopoID id);
 };
 } // namespace xerxes
 
