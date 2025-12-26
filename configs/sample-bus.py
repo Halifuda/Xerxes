@@ -1,7 +1,16 @@
 from mkcfg import utils, devices
+import argparse
 
-SCALE = 1
-RATIO = 0.0 # ratio must be set as float
+
+parser = argparse.ArgumentParser(description="Sample bus config")
+parser.add_argument("-s", "--scale", type=int, default=1, help="number of host/mem pairs")
+parser.add_argument("-r", "--ratio", type=float, default=0.0, help="write ratio (float) for memory devices")
+parser.add_argument("--log", type=str, default="output/sample-bus.csv", help="name of log file")
+args = parser.parse_args()
+
+SCALE = args.scale
+RATIO = args.ratio
+LOG = args.log
 
 reqs = [devices.Requester(f"Host-{i}") for i in range(SCALE)]
 mems = [devices.DRAMsim3Interface(f"Mem-{i}") for i in range(SCALE)]
@@ -13,6 +22,7 @@ bus = devices.DuplexBus("Bus")
 
 for r in reqs:
     r.interleave_param = 500
+    r.interleave_type = "random"
 for m in mems:
     m.wr_ratio = RATIO
 switch1.delay = 0 
@@ -23,7 +33,7 @@ switch2.delay = 0 # oracle switches, just gether all requests
 bus.frame_size = 64
 
 cfg = utils.Config()
-cfg.log_name = f"output/sample-bus-{RATIO}.csv"
+cfg.log_name = LOG
 cfg.add_devices(reqs)
 cfg.add_devices(mems)
 cfg.add_devices([switch1, switch2, bus])

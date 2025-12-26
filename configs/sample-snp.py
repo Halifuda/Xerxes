@@ -1,7 +1,17 @@
 from mkcfg import utils, devices
+import argparse
 
-SCALE = 2
-EVICT = "FIFO"
+
+
+parser = argparse.ArgumentParser(description="Sample snoop config")
+parser.add_argument("-s", "--scale", type=int, default=1, help="number of host/mem pairs")
+parser.add_argument("-e", "--evict", type=str, default="FIFO", help="eviction policy for snoop device")
+parser.add_argument("--log", type=str, default="output/sample-snp.csv", help="name of log file")
+args = parser.parse_args()
+
+SCALE = args.scale
+LOG = args.log
+EVICT = args.evict
 
 reqs = [devices.Requester(f"Host-{i}") for i in range(SCALE)]
 mem = devices.DRAMsim3Interface("Mem")
@@ -19,7 +29,7 @@ snoop.ranges = []
 snoop.ranges.append([mem.start, mem.start + mem.capacity])
 
 cfg = utils.Config()
-cfg.log_name = f"output/sample-snp-{EVICT}.csv"
+cfg.log_name = LOG
 cfg.add_devices(reqs)
 cfg.add_devices([mem, switch, bus, snoop])
 

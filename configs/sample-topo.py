@@ -1,7 +1,17 @@
 from mkcfg import utils, devices
+import argparse
 
-SCALE = 8
-TOPO = "full"
+
+parser = argparse.ArgumentParser(description="Sample bus config")
+parser.add_argument("-s", "--scale", type=int, default=8, help="number of host/mem pairs")
+parser.add_argument("-t", "--topo", type=str, default="full", help="topology type (ring, chain, full)")
+parser.add_argument("--log", type=str, default="output/sample-topo.csv", help="name of log file")
+args = parser.parse_args()
+
+SCALE = args.scale
+TOPO = args.topo
+LOG = args.log
+
 
 reqs = [devices.Requester(f"Host-{i}") for i in range(SCALE)]
 mems = [devices.DRAMsim3Interface(f"Mem-{i}") for i in range(SCALE)]
@@ -13,10 +23,10 @@ for r in reqs:
 for m in mems:
     m.wr_ratio = 0.0 # ratio must be set as float
 for s in switches:
-    s.delay = 32 # set port delay to N ns
+    s.delay = 25 # set port delay to N ns
 
 cfg = utils.Config()
-cfg.log_name = f"output/sample-{TOPO}.csv"
+cfg.log_name = LOG
 cfg.add_devices(reqs)
 cfg.add_devices(mems)
 cfg.add_devices(switches)
