@@ -56,6 +56,9 @@ bool events_empty();
 
 // Parse the configuration file and return a XerxesContext object.
 XerxesContext parse_config(std::string config_file_name);
+
+// Log statistics of all devices.
+void log_stats(std::ostream &os);
 } // namespace xerxes
 
 TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::XerxesConfig, max_clock,

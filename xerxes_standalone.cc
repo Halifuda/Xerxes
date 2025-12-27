@@ -13,6 +13,7 @@
 
 namespace xerxes {
 Simulation *glb_sim = nullptr;
+std::vector<std::function<void(std::ostream &)>> glb_stat_loggers;
 
 void default_logger(const Packet &pkt) {
     static bool first = true;
@@ -96,6 +97,8 @@ bool events_empty() { return glb_engine.empty(); }
             toml::find_or<ConfigType>(data, pair.first, ConfigType{});         \
         auto dev = new TypeName(glb_sim, config, pair.first);                  \
         glb_sim->system()->add_dev(dev);                                       \
+        glb_stat_loggers.push_back(                                            \
+            [dev](std::ostream &os) { dev->log_stats(os); });                  \
         if (type == "Requester")                                               \
             ctx.requesters.push_back(dynamic_cast<Requester *>(dev));          \
         else if (type == "DRAMsim3Interface")                                  \
@@ -108,6 +111,7 @@ bool events_empty() { return glb_engine.empty(); }
 
 XerxesContext parse_config(std::string config_file_name) {
     ASSERT(glb_sim != nullptr, "Simulation is not initialized.");
+    glb_stat_loggers.clear();
     XerxesContext ctx;
     auto data = toml::parse(config_file_name);
     ctx.general = toml::get<XerxesConfig>(data);
@@ -142,5 +146,11 @@ XerxesContext parse_config(std::string config_file_name) {
         }
     }
     return ctx;
+}
+
+void log_stats(std::ostream &os) {
+    for (auto &logger : glb_stat_loggers) {
+        logger(os);
+    }
 }
 } // namespace xerxes

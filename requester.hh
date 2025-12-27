@@ -335,6 +335,7 @@ class Requester : public Device {
 
     void log_stats(std::ostream &os) override {
         os << name() << " stats: " << std::endl;
+        os << " * Payload size: " << block_size << " bytes" << std::endl;
         os << " * Issued packets: " << cur_cnt << std::endl;
         os << " * Evict count: " << stats[-1]["Cache evict count"] << std::endl;
         os << " * Hit count: " << stats[-1]["Cache hit count"] << std::endl;
@@ -348,24 +349,23 @@ class Requester : public Device {
             agg_cnt += pair.second["Count"];
             os << " * Endpoint " << pair.first << ": " << std::endl;
             os << "   - Bandwidth (GB/s): "
-               << pair.second["Bandwidth"] * 1000 / (double)(last_arrive)
-               << std::endl;
-            agg_bw += pair.second["Bandwidth"] * 1000 / (double)(last_arrive);
+               << pair.second["Bandwidth"] / (double)(last_arrive) << std::endl;
+            agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
 
-            os << "   - Average latency (ps): "
+            os << "   - Average latency (ns): "
                << pair.second["Average latency"] / pair.second["Count"]
                << std::endl;
             agg_lat += pair.second["Average latency"];
 
-            os << "   - Average wait for evict (ps): "
+            os << "   - Average wait for evict (ns): "
                << pair.second["Average wait for evict"] / pair.second["Count"]
                << std::endl;
             agg_wait += pair.second["Average wait for evict"];
         }
         os << " * Aggregate: " << std::endl;
         os << "   - Bandwidth (GB/s): " << agg_bw << std::endl;
-        os << "   - Average latency (ps): " << agg_lat / agg_cnt << std::endl;
-        os << "   - Average wait for evict (ps): " << agg_wait / agg_cnt
+        os << "   - Average latency (ns): " << agg_lat / agg_cnt << std::endl;
+        os << "   - Average wait for evict (ns): " << agg_wait / agg_cnt
            << std::endl;
     }
 

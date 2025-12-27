@@ -147,6 +147,7 @@ class DuplexBus : public Device {
 
     void log_stats(std::ostream &os) override {
         os << name() << " stats: " << std::endl;
+        os << "Frame size: " << frame_size << " bytes" << std::endl;
         for (auto &stat : stats) {
             os << std::fixed << stat.first << ": " << stat.second << std::endl;
         }
