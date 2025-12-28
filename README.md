@@ -23,7 +23,7 @@ cmake --build build --target Xerxes
 ## Generate configuration
 
 
-We've provided a set of Python scripts under `configs` folder as the tool and samples to build the TOML config files (cf. `sample-topo.py`, `sample-bus.py`, and `sample-snp.py`). 
+We've provided a set of Python scripts in the `configs` folder as the tool and samples to build the TOML config files (cf. `sample-topo.py`, `sample-bus.py`, and `sample-snp.py`). 
 
 `sample-topo.py`: Focuses on the network topologies (e.g., ring, chain, and full).
 `sample-bus.py`: Concentrates on bus-level parameters (e.g., frame size of the DuplexBus).
@@ -52,7 +52,7 @@ build/Xerxes configs/config.toml
 
 
 
-## Result explaination
+## Result explanation
 Upon successful simulation run, Xerxes emits a per-request log in CSV format to the output file specified in the TOML configuration. Each row corresponds to a single request and records timestamps and per-component latencies used for post-hoc analysis. Example output:
 
 ```
@@ -99,39 +99,55 @@ We provide a `report.py` script in the `output` folder to help users analyze sim
 # Artifact Evaluation
 
 
+To streamline the AE process, we provide the `run_all.sh` script in the `AE-scripts` folder, which sequentially executes all AE test scripts and generates the resulting plots, saving them to the `figures` directory.
+
 ## System topologies (Section 5.1)
 
 To reproduce the experiments for Figure 10, 11, and 12, use the test scripts in the `AE-scripts` folder:
 ```bash
-cd Xerxes
-bash AE-scripts/fig10.sh # Generates results for Figure 10
-bash AE-scripts/fig11.sh # Generates results for Figure 11
-bash AE-scripts/fig12.sh # Generates results for Figure 12
+cd Xerxes # ensure in the repository root
+bash AE-scripts/fig10.sh # Generates results for Figure 10 (cf. output/fig10)
+bash AE-scripts/fig11.sh # Generates results for Figure 11 (cf. output/fig11)
+bash AE-scripts/fig12.sh # Generates results for Figure 12 (cf. output/fig12)
 ```
 
 After running the test scripts, use the plotting scripts in the `output` folder to generate the figures:
 ```bash
-cd Xerxes
-python3 plot_fig11.py # Generates Figure 11
-python3 plot_fig12.py # Generates Figure 12
+cd Xerxes # ensure in the repository root
+python3 output/plot_fig11.py # Generates Figure 11, saving the image to output/fig11/fig11.png
+python3 output/plot_fig12.py # Generates Figure 12, saving the image to output/fig12/fig12.png
 ```
 
 ## Back-invalidation mechanism (Section 5.2)
+
+To reproduce the experiments for Figure 13 and 14, use the test scripts in the `AE-scripts` folder:
+```bash
+cd Xerxes # ensure in the repository root
+bash AE-scripts/fig13.sh # Generates results for Figure 13 (cf. output/fig13)
+bash AE-scripts/fig14.sh # Generates results for Figure 14 (cf. output/fig14)
+```
+
+After running the test scripts, use the plotting scripts in the `output` folder to generate the figures:
+```bash
+cd Xerxes # ensure in the repository root
+python3 output/plot_fig13.py # Generates Figure 13, saving the image to output/fig13/fig13.png
+python3 output/plot_fig14.py # Generates Figure 14, saving the image to output/fig14/fig14.png
+```
 
 ## Full duplex transmission (Section 5.3)
 
 To reproduce the experiments for Figure 15, 16, and 17, use the test scripts in the `AE-scripts` folder:
 ```bash
-cd Xerxes
-bash fig1516.sh # Generates results for Figure 15 and 16
-bash fig17.sh   # Generates results for Figure 17
+cd Xerxes # ensure in the repository root
+bash AE-scripts/fig1516.sh # Generates results for Figure 15 and 16 (cf. output/fig1516)
+bash AE-scripts/fig17.sh   # Generates results for Figure 17 (cf.output/fig17)
 ```
 
 After running the test scripts, use the plotting scripts in the `output` folder to generate the figures:
 ```bash
-cd Xerxes
-python3 plot_fig1516.py # Generates Figure 15 and 16
-python3 plot_fig17.py   # Generates Figure 17
+cd Xerxes # ensure in the repository root
+python3 output/plot_fig1516.py # Generates Figure 15 and 16, saving the image to output/fig1516/fig1516.png
+python3 output/plot_fig17.py   # Generates Figure 17, saving the image to output/fig17/fig17.png
 ```
 
 

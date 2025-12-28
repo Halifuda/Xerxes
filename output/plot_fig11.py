@@ -120,7 +120,7 @@ def plot_hoplat_figure(summary_dir, output_path):
 if __name__ == '__main__':
     script_dir = os.path.dirname(os.path.abspath(__file__))
     summary_dir = os.path.join(script_dir, 'fig11/summary')
-    output_path = os.path.join(script_dir, 'fig11/hoplat.png')
+    output_path = os.path.join(script_dir, 'fig11/fig11.png')
     
     if not os.path.exists(summary_dir):
         print(f"Error: Summary directory not found: {summary_dir}")
