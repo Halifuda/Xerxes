@@ -25,6 +25,8 @@ class RequesterConfig {
     size_t block_size = 64;
     std::string interleave_type = "stream";
     size_t interleave_param = 5;
+    double hot_req_ratio = 0.5;
+    double hot_region_ratio = 0.5;
     std::string trace_file = "";
 };
 } // namespace xerxes
@@ -33,6 +35,7 @@ TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::RequesterConfig, q_capacity,
                                        cache_capacity, cache_delay, issue_delay,
                                        coherent, burst_size, block_size,
                                        interleave_type, interleave_param,
+                                       hot_req_ratio, hot_region_ratio,
                                        trace_file);
 
 namespace xerxes {
@@ -58,6 +61,8 @@ class Requester : public Device {
             size_t capacity;
             double ratio;
             Addr cur;
+            Addr hot_start = 0;
+            size_t hot_capacity = 0;
         };
         std::vector<EndPoint> end_points;
         size_t cur = 0;
@@ -65,6 +70,7 @@ class Requester : public Device {
 
       public:
         Interleaving(size_t block_size = 64) : block_size(block_size) {
+            gen.seed(rd());
             uni = std::uniform_real_distribution<>(0, 1);
         }
         size_t size() { return end_points.size(); }
@@ -146,25 +152,81 @@ class Requester : public Device {
         size_t total_count;
         size_t cur_count = 0;
         std::normal_distribution<> norm;
+        double hot_req_ratio;
+        double hot_region_ratio;
+
+        void configure_hot_region(EndPoint &ep) {
+            auto blocks = ep.capacity / block_size;
+            if (blocks == 0) {
+                ep.hot_start = ep.start;
+                ep.hot_capacity = 0;
+                return;
+            }
+
+            auto hot_blocks = static_cast<size_t>(
+                std::max<size_t>(1, std::round(blocks * hot_region_ratio)));
+            hot_blocks = std::min(hot_blocks, blocks);
+            auto max_start = blocks - hot_blocks;
+            size_t start_block = 0;
+            if (max_start > 0) {
+                std::uniform_int_distribution<size_t> dist(0, max_start);
+                start_block = dist(gen);
+            }
+            ep.hot_start = ep.start + start_block * block_size;
+            ep.hot_capacity = hot_blocks * block_size;
+        }
 
       public:
-        Random(size_t total_count, size_t block_size = 64)
-            : Interleaving(block_size), total_count(total_count) {
+        Random(size_t total_count, size_t block_size = 64,
+               double hot_req_ratio = 0.5, double hot_region_ratio = 0.5)
+            : Interleaving(block_size), total_count(total_count),
+              hot_req_ratio(hot_req_ratio), hot_region_ratio(hot_region_ratio) {
             norm = std::normal_distribution<>(0.5, 0.5);
+        }
+
+        void finalize_endpoint(size_t idx) {
+            ASSERT(idx < end_points.size(), "Endpoint index out of range");
+            configure_hot_region(end_points[idx]);
         }
         bool eof() { return cur_count == total_count; }
         Request next() {
-            auto ep = end_points[cur].id;
-            auto seed = fmax(0, norm(gen));
-            seed = fmin(seed, 1);
-            auto addr = Addr(floor(double(end_points[cur].capacity) /
-                                   block_size * seed)) *
-                            block_size +
-                        end_points[cur].start;
-            bool is_write = uni(gen) < end_points[cur].ratio;
+            auto &ep = end_points[cur];
+            Addr addr = ep.start;
+
+            auto total_blocks = ep.capacity / block_size;
+            auto hot_blocks = ep.hot_capacity / block_size;
+            auto pre_hot_blocks = (ep.hot_start - ep.start) / block_size;
+            auto post_hot_blocks = total_blocks - pre_hot_blocks - hot_blocks;
+
+            bool use_hot = uni(gen) < hot_req_ratio;
+
+            if (use_hot || hot_blocks == total_blocks || hot_blocks == 0) {
+                size_t hot_offset =
+                    (hot_blocks > 0)
+                        ? static_cast<size_t>(uni(gen) * hot_blocks)
+                        : 0;
+                auto chosen_block = pre_hot_blocks + hot_offset;
+                addr = ep.start + chosen_block * block_size;
+            } else {
+                auto cold_blocks = pre_hot_blocks + post_hot_blocks;
+                if (cold_blocks == 0) {
+                    addr = ep.hot_start;
+                } else {
+                    auto pick = static_cast<size_t>(uni(gen) * cold_blocks);
+                    if (pick < pre_hot_blocks) {
+                        addr = ep.start + pick * block_size;
+                    } else {
+                        auto post_idx = pick - pre_hot_blocks;
+                        addr = ep.hot_start + ep.hot_capacity +
+                               post_idx * block_size;
+                    }
+                }
+            }
+
+            bool is_write = uni(gen) < ep.ratio;
             cur = (cur + 1) % end_points.size();
             cur_count++;
-            return {ep, addr, 0, is_write};
+            return {ep.id, addr, 0, is_write};
         }
     };
 
@@ -242,7 +304,12 @@ class Requester : public Device {
         if (config.interleave_type == "stream") {
             end_points = new Stream{config.interleave_param};
         } else if (config.interleave_type == "random") {
-            end_points = new Random{config.interleave_param};
+            end_points =
+                new Random{config.interleave_param, block_size, 0.5, 0.5};
+        } else if (config.interleave_type == "hotcold") {
+            end_points =
+                new Random{config.interleave_param, block_size,
+                           config.hot_req_ratio, config.hot_region_ratio};
         } else if (config.interleave_type == "trace") {
             end_points = new Trace{config.trace_file};
         } else {
@@ -253,6 +320,8 @@ class Requester : public Device {
     Requester &add_end_point(TopoID id, Addr start, size_t capacity,
                              double ratio) {
         end_points->push_back({id, start, capacity, ratio});
+        if (auto rnd = dynamic_cast<Random *>(end_points))
+            rnd->finalize_endpoint(end_points->size() - 1);
         stats[id] = {};
         stats[id]["Count"] = 0;
         stats[id]["Bandwidth"] = 0;
@@ -279,7 +348,8 @@ class Requester : public Device {
                     << name() << " receive packet " << pkt.id
                     << ", issue queue is full? " << q.full() << std::endl;
                 last_arrive = pkt.arrive;
-                cache.insert(pkt.addr);
+                if (coherent)
+                    cache.insert(pkt.addr);
 
                 // Update stats
                 stats[pkt.src]["Count"] += 1;
@@ -295,14 +365,17 @@ class Requester : public Device {
                 q.pop(pkt);
                 pkt.log_stat();
             } else if (pkt.type == INV) {
-                cache.invalidate(pkt.addr);
-                stats[-1]["Cache evict count"] += 1;
-                std::swap(pkt.src, pkt.dst);
-                pkt.is_rsp = true;
-                pkt.payload = block_size * pkt.burst;
-                pkt.arrive += cache.delay; // TODO: one or each?
-                pkt.delta_stat(NormalStatType::HOST_INV_DELAY, cache.delay);
-                send_pkt(pkt);
+                if (coherent) {
+                    cache.invalidate(pkt.addr);
+                    stats[-1]["Cache evict count"] += 1;
+                    std::swap(pkt.src, pkt.dst);
+                    pkt.is_rsp = true;
+                    pkt.payload = block_size * pkt.burst;
+                    pkt.arrive += cache.delay; // TODO: one or each?
+                    pkt.delta_stat(NormalStatType::HOST_INV_DELAY, cache.delay);
+                    cur = std::max(cur, pkt.arrive) + issue_delay;
+                    send_pkt(pkt);
+                }
             }
             return;
         }
@@ -386,7 +459,8 @@ class Requester : public Device {
             // TODO: Strict to trace?
             if (req.tick != 0)
                 cur = req.tick;
-            if (cache.hit(addr)) {
+            // Only check cache when coherent
+            if (coherent && cache.hit(addr)) {
                 stats[ep]["Count"] += 1;
                 stats[ep]["Bandwidth"] += burst_size * 64;
                 stats[ep]["Average latency"] += cache.delay;
@@ -396,8 +470,12 @@ class Requester : public Device {
                     << name() << " cache hit: " << addr << "," << cur << ","
                     << cur + cache.delay << std::endl;
                 cur += cache.delay;
+                last_arrive = cur;
                 return true;
             }
+            // Include cache check latency on miss only when coherent
+            if (coherent)
+                cur += cache.delay;
             auto type = req.is_write
                             ? (coherent ? PacketType::WT : PacketType::NT_WT)
                             : (coherent ? PacketType::RD : PacketType::NT_RD);

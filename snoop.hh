@@ -618,24 +618,24 @@ class Snoop : public Device {
     }
 
     void log_stats(std::ostream &os) override {
-        // os << name() << " stats:" << std::endl;
-        // for (auto &pair : host_trig_conflict_count) {
-        //   auto &host = pair.first;
-        //   auto &count = pair.second;
-        //   os << " * host " << host << " conflict count: " << count <<
-        //   std::endl;
-        // }
-        // double avg_burst_inv = 0;
-        // double total_burst_inv = 0;
-        // for (auto &pair : burst_inv_size_count) {
-        //   auto &burst = pair.first;
-        //   auto &count = pair.second;
-        //   avg_burst_inv += burst * count;
-        //   total_burst_inv += count;
-        // }
-        // avg_burst_inv /= total_burst_inv;
-        // os << " * average burst invalidation size: " << avg_burst_inv <<
-        // std::endl;
+        os << name() << " stats:" << std::endl;
+        for (auto &pair : host_trig_conflict_count) {
+            auto &host = pair.first;
+            auto &count = pair.second;
+            os << " * host " << host << " conflict count: " << count
+               << std::endl;
+        }
+        double avg_burst_inv = 0;
+        double total_burst_inv = 0;
+        for (auto &pair : burst_inv_size_count) {
+            auto &burst = pair.first;
+            auto &count = pair.second;
+            avg_burst_inv += burst * count;
+            total_burst_inv += count;
+        }
+        avg_burst_inv /= total_burst_inv;
+        os << " * average burst invalidation size: " << avg_burst_inv
+           << std::endl;
 
         std::map<size_t, size_t> evict_count_pdf;
         for (auto &pair : evict_count) {
@@ -645,7 +645,7 @@ class Snoop : public Device {
             }
             evict_count_pdf[count] += 1;
         }
-        // os << " * Evict count distribution: " << std::endl;
+        os << " * Evict count distribution: " << std::endl;
         for (auto &pair : evict_count_pdf) {
             os << pair.first << "," << pair.second << std::endl;
         }

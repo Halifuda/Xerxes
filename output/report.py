@@ -33,7 +33,8 @@ if not os.path.exists(file):
     exit(1)
 numeric_cols = [
     'switch_time', 'send', 'arrive',
-    'switch_queuing', 'dram_queuing', 'total_time'
+    'switch_queuing', 'dram_queuing', 'total_time',
+    'snoop_evict'
 ]
 
 # Read CSV robustly to avoid mixed-type NaNs from chunked inference
@@ -103,6 +104,7 @@ for hop in avg_latency:
 final_avg_latency = agg_avg_latency / total_count
 final_bw = total_count * 64 / (last_arrival - first_sent) # B/ns
 final_bw = final_bw * 1e9 / (1024 * 1024) # MB/s
+avg_wait_inv = data['snoop_evict'].mean(skipna=True) if 'snoop_evict' in data.columns else 0
 
 if args.report == "hoplat":
     keys = list(avg_latency.keys())
@@ -136,6 +138,8 @@ elif args.report == "rw":
     print(f"{overall_mix},{overall_bw}")
 elif args.report == "avg_lat":
     print(f"{final_avg_latency}")
+elif args.report == "avg_wait_inv":
+    print(f"{avg_wait_inv}")
 
 # print("Average Latency: ", final_avg_latency, "ns")
 # print("Throughput: ", final_bw, "MB/s")
