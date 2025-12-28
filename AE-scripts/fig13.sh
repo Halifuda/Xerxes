@@ -25,6 +25,3 @@ for policy in ${policies[@]}
 do
     cp output/fig13/${policy}.err output/fig13/summary/${policy}.err
 done
-
-# Plot normalized bars vs FIFO using stderr stats
-python3 output/plot_fig13.py output/fig13

@@ -2,12 +2,9 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "$DIR"
 SCRIPT_FOLDER="$(basename "$DIR")"
-echo "$SCRIPT_FOLDER"
 PARENT_DIR="$(dirname "$DIR")"
-echo "$PARENT_DIR"
-SCRIPTS=(fig11.sh) # fig10.sh fig11.sh fig12.sh fig13.sh fig14.sh fig17.sh fig1516.sh)
+SCRIPTS=(fig10.sh fig11.sh fig12.sh fig13.sh fig14.sh fig17.sh fig1516.sh)
 
 cd "$PARENT_DIR"
 
@@ -28,7 +25,16 @@ for s in "${SCRIPTS[@]}"; do
   # run the script with working directory set to DIR's parent
   bash "$script"
 
+
   base="${s%.sh}"
+  plt_script="output/plot_${base}.py"
+  if [[ ! -f "$plt_script" ]]; then
+    echo "Warning: Plot script for $base is not supported, skipping plot." >&2
+    continue
+  else
+    python3 output/plot_${base}.py
+  fi
+
   fig_src="output/$base/$base.png"
   if [[ -f "$fig_src" ]]; then
     cp -f "$fig_src" "figures/"

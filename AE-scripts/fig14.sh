@@ -45,6 +45,3 @@ for len in ${lens[@]}; do
     cp output/fig14/len-${len}_avgwaitinv.csv output/fig14/summary/len-${len}_avgwaitinv.csv
     cp output/fig14/len-${len}.err output/fig14/summary/len-${len}.err
 done
-
-# Plot fig14 metrics (BW, avg latency via report, avg wait on invalidation) from .err and .csv
-python3 output/plot_fig14.py output/fig14

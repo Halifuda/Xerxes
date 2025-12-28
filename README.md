@@ -23,10 +23,9 @@ cmake --build build --target Xerxes
 ## Generate configuration
 
 
-We've provided a set of Python scripts in the `configs` folder as the tool and samples to build the TOML config files (cf. `sample-topo.py`, `sample-bus.py`, and `sample-snp.py`). 
+We've provided a set of Python scripts in the `configs` folder as the tool and samples to build the TOML config files (cf. `sample-topo.py` and `sample-snp.py`). 
 
 `sample-topo.py`: Focuses on the network topologies (e.g., ring, chain, and full).
-`sample-bus.py`: Concentrates on bus-level parameters (e.g., frame size of the DuplexBus).
 `sample-snp.py`: Emphasizes configurations that enable snoop (cache-coherence) behavior.
 
 All three generators accept command-line options. Their typical usage patterns include:
@@ -35,7 +34,6 @@ All three generators accept command-line options. Their typical usage patterns i
 
 ```
 python configs/sample-bus.py --scale 4 --ratio 0.25 --log output/sample-bus.csv > configs/sample-bus.toml
-python configs/sample-snp.py --scale 8 --evict FIFO --log output/sample-snp.csv > configs/sample-snp.toml
 python configs/sample-topo.py --scale 16 --topo ring --log output/sample-topo.csv > configs/sample-topo.toml
 ```
 
@@ -47,7 +45,8 @@ From an implementation perspective, these scripts are wrappers that use the cons
 
 The Xerxes requires a TOML file to configure the simulation. The command can be similar to the following:
 ```
-build/Xerxes configs/config.toml
+build/Xerxes configs/sample-bus.toml
+build/Xerxes configs/sample-topo.toml
 ```
 
 
