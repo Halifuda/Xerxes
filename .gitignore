@@ -1,6 +1,9 @@
 # TGT
 build/
 debug/
-output/
+
+
 .cache/
 configs/mkcfg/__pycache__/
+
+output/fig*/

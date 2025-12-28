@@ -93,16 +93,45 @@ Field descriptions:
 - `dram_time`: Service time at the DRAM device (actual DRAM access latency).
 - `total_time`: End-to-end latency observed for the request.
 
+We provide a `report.py` script in the `output` folder to help users analyze simulation results, including statistics for bandwidth (bw), average latency (avg_lat), and other metrics.
+
+
 # Artifact Evaluation
-
-## Validation (Section 4)
-
 
 
 ## System topologies (Section 5.1)
 
+To reproduce the experiments for Figure 10, 11, and 12, use the test scripts in the `AE-scripts` folder:
+```bash
+cd Xerxes
+bash AE-scripts/fig10.sh # Generates results for Figure 10
+bash AE-scripts/fig11.sh # Generates results for Figure 11
+bash AE-scripts/fig12.sh # Generates results for Figure 12
+```
+
+After running the test scripts, use the plotting scripts in the `output` folder to generate the figures:
+```bash
+cd Xerxes
+python3 plot_fig11.py # Generates Figure 11
+python3 plot_fig12.py # Generates Figure 12
+```
+
 ## Back-invalidation mechanism (Section 5.2)
 
 ## Full duplex transmission (Section 5.3)
+
+To reproduce the experiments for Figure 15, 16, and 17, use the test scripts in the `AE-scripts` folder:
+```bash
+cd Xerxes
+bash fig1516.sh # Generates results for Figure 15 and 16
+bash fig17.sh   # Generates results for Figure 17
+```
+
+After running the test scripts, use the plotting scripts in the `output` folder to generate the figures:
+```bash
+cd Xerxes
+python3 plot_fig1516.py # Generates Figure 15 and 16
+python3 plot_fig17.py   # Generates Figure 17
+```
 
 
