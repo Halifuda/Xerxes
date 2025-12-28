@@ -101,6 +101,13 @@ We provide a `report.py` script in the `output` folder to help users analyze sim
 
 To streamline the AE process, we provide the `run_all.sh` script in the `AE-scripts` folder, which sequentially executes all AE test scripts and generates the resulting plots, saving them to the `figures` directory.
 
+
+
+```bash
+# ensure in the repository root
+bash AE-scripts/run_all.sh
+```
+
 ## System topologies (Section 5.1)
 
 To reproduce the experiments for Figure 10, 11, and 12, use the test scripts in the `AE-scripts` folder:
