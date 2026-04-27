@@ -99,4 +99,5 @@ class Switch(Device):
         self.name = name
         self.params = {
             "delay": 1,
+            "routing_mode": "bfs",
         }

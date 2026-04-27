@@ -47,6 +47,9 @@ hot_req_ratio = 0.5
 hot_region_ratio = 0.5
 trace_file = ""
 random_seed = 42
+hpa_base = 0
+hpa_size = 1073741824
+wr_ratio = 0.0
 
 [Host-1]
 q_capacity = 32
@@ -62,6 +65,9 @@ hot_req_ratio = 0.5
 hot_region_ratio = 0.5
 trace_file = ""
 random_seed = 42
+hpa_base = 0
+hpa_size = 1073741824
+wr_ratio = 0.0
 
 [Mem]
 tick_per_clock = 1

@@ -12,10 +12,11 @@ class SwitchConfig {
   public:
     // Delay for each packet to be processed by the switch.
     Tick delay = 1;
+    std::string routing_mode = "bfs";  // "bfs" | "pbr"
 };
 } // namespace xerxes
 
-TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::SwitchConfig, delay);
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::SwitchConfig, delay, routing_mode);
 
 namespace xerxes {
 // n-to-n switch device.
@@ -54,29 +55,41 @@ class Switch : public Device {
     };
 
     Tick delay;
+    std::string routing_mode_str;
+    std::map<TopoID, TopoID> route_table;  // dpid -> next_hop TopoID
+    bool pbr_enabled = false;
     // Used for batching packets from upstreams.
     // TODO: should deprecate.
     std::unordered_map<TopoID, std::pair<size_t, Tick>> upstreams;
     std::unordered_map<TopoID, Port> ports;
 
+    TopoID pbr_next_hop(TopoID dpid) {
+        if (pbr_enabled) {
+            auto it = route_table.find(dpid);
+            ASSERT(it != route_table.end(), name() + ": no PBR route for DPID " +
+                        std::to_string(dpid));
+            return it->second;
+        }
+        auto to = topology->next_node(self, dpid);
+        ASSERT(to != nullptr, name() + ": no BFS route for DPID " +
+                      std::to_string(dpid));
+        return to->id();
+    }
+
     // Routing: decide which port to use for the packet based on its
     // destination.
     Port &to_port(const Packet &pkt) {
-        auto to = topology->next_node(self, pkt.dst);
-        ASSERT(to != nullptr, name() + ": No next node for packet " +
-                                  std::to_string(pkt.id) + " from " +
-                                  std::to_string(pkt.src) + " to " +
-                                  std::to_string(pkt.dst));
-        if (ports.find(to->id()) == ports.end()) {
-            ports[to->id()] = Port{};
-            ports[to->id()].id = to->id();
+        auto next_hop = pbr_next_hop(pkt.dst);
+        if (ports.find(next_hop) == ports.end()) {
+            ports[next_hop] = Port{};
+            ports[next_hop].id = next_hop;
             for (auto &neighbor : topology->get_node(self)->neighbors()) {
-                ports[to->id()].queues[neighbor] = std::queue<Packet>();
-                ports[to->id()].current = ports[to->id()].queues.begin();
+                ports[next_hop].queues[neighbor] = std::queue<Packet>();
+                ports[next_hop].current = ports[next_hop].queues.begin();
             }
         }
         // Using default routing from topology.
-        return ports[to->id()];
+        return ports[next_hop];
     }
 
     void sched(Port &port) {
@@ -101,10 +114,16 @@ class Switch : public Device {
   public:
     Switch(Simulation *sim, const SwitchConfig &config,
            std::string name = "Switch")
-        : Device(sim, name), delay(config.delay) {}
+        : Device(sim, name), delay(config.delay),
+          routing_mode_str(config.routing_mode) {}
 
     void add_upstream(TopoID id, Tick delay) {
         upstreams.insert({id, {0, delay}});
+    }
+
+    void set_pbr_route(TopoID dpid, TopoID next_hop) {
+        pbr_enabled = true;
+        route_table[dpid] = next_hop;
     }
 
     void transit() override {

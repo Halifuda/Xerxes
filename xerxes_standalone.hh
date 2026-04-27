@@ -1,5 +1,6 @@
 #pragma once
 #include "dramsim3_interface.hh"
+#include "fabric_manager.hh"
 #include "requester.hh"
 #ifndef XERXES_STANDALONE_HH
 #define XERXES_STANDALONE_HH
@@ -29,6 +30,7 @@ struct XerxesConfig {
 class Requester;
 class DRAMsim3Interface;
 class AddressSystem;
+class Snoop;
 
 // Structured data from a TOML configuration file.
 struct XerxesContext {
@@ -40,6 +42,12 @@ struct XerxesContext {
     std::vector<Requester *> requesters;
     // All DRAMsim3 endpoints.
     std::vector<DRAMsim3Interface *> mems;
+    // All switches (for PBR).
+    std::vector<FabricManager::SwitchRef> switches;
+    // All snoops.
+    std::vector<Snoop *> snoops;
+    // PBR routing policy.
+    FabricManager::Policy routing_policy = FabricManager::BFS;
 };
 
 // Used for logging packet information, if the logger is not set by the user.

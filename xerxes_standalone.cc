@@ -106,6 +106,10 @@ bool events_empty() { return glb_engine.empty(); }
         else if (type == "DRAMsim3Interface")                                  \
             ctx.mems.push_back(dynamic_cast<DRAMsim3Interface *>(dev));        \
         auto id = dev->id();                                                   \
+        if (type == "Switch")                                                  \
+            ctx.switches.push_back({id, dynamic_cast<Switch *>(dev)});         \
+        else if (type == "Snoop")                                              \
+            ctx.snoops.push_back(dynamic_cast<Snoop *>(dev));                  \
         ctx.name_to_id[pair.first] = id;                                       \
         XerxesLogger::debug()                                                  \
             << "Add " #TypeName ": " << pair.first << "#" << id << std::endl;  \
@@ -150,6 +154,20 @@ XerxesContext parse_config(std::string config_file_name) {
     }
     as->add_region(region);
     glb_sim->set_address_system(as);
+
+    std::vector<FabricManager::EndpointRef> endpoints;
+    for (auto *req : ctx.requesters)
+        endpoints.push_back({req->id()});
+    for (auto *mem : ctx.mems)
+        endpoints.push_back({mem->id()});
+    for (auto *snoop : ctx.snoops)
+        endpoints.push_back({snoop->id()});
+    FabricManager::build_routes(
+        glb_sim->topology(),
+        ctx.switches,
+        endpoints,
+        ctx.routing_policy
+    );
 
     for (auto &req : ctx.requesters) {
         req->set_hpa_range(0, 1ULL << 30);
