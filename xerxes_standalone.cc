@@ -1,4 +1,5 @@
 #include "xerxes_standalone.hh"
+#include "address_system.hh"
 #include "bus.hh"
 #include "def.hh"
 #include "device.hh"
@@ -138,13 +139,20 @@ XerxesContext parse_config(std::string config_file_name) {
     // Call build route after all devices are added.
     glb_sim->topology()->build_route();
 
-    // Manually add end points for requesters.
-    // TODO: should decouple memory space and requesters.
+    auto as = new AddressSystem();
+    AddressSystem::Region region;
+    region.hpa_start = 0;
+    region.hpa_size = 1ULL << 30;
+    region.ways = ctx.mems.size();
+    region.granularity = 64;
+    for (size_t i = 0; i < ctx.mems.size(); ++i) {
+        region.targets.push_back({ctx.mems[i]->id(), 0});
+    }
+    as->add_region(region);
+    glb_sim->set_address_system(as);
+
     for (auto &req : ctx.requesters) {
-        for (auto &mem : ctx.mems) {
-            req->add_end_point(mem->id(), mem->start_addr(), mem->capacity(),
-                               mem->wr_ratio());
-        }
+        req->set_hpa_range(0, 1ULL << 30);
     }
     return ctx;
 }

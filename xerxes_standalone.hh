@@ -28,6 +28,7 @@ struct XerxesConfig {
 
 class Requester;
 class DRAMsim3Interface;
+class AddressSystem;
 
 // Structured data from a TOML configuration file.
 struct XerxesContext {

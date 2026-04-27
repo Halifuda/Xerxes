@@ -52,11 +52,11 @@ class DRAMsim3Interface : public Device {
                 memsys.ClockTick();
                 ++interface_clock;
             }
-            if (memsys.WillAcceptTransaction(pkt.addr - start,
+            if (memsys.WillAcceptTransaction(pkt.dpa,
                                              pkt.is_write())) {
-                if (issued.find(pkt.addr) == issued.end())
-                    issued[pkt.addr] = std::list<Packet>();
-                issued[pkt.addr].push_back(pkt);
+                if (issued.find(pkt.dpa) == issued.end())
+                    issued[pkt.dpa] = std::list<Packet>();
+                issued[pkt.dpa].push_back(pkt);
                 to_erase.push_back(it);
                 if (interface_clock * tick_per_clock > pkt.arrive) {
                     pkt.delta_stat(DRAM_INTERFACE_QUEUING_DELAY,
@@ -64,7 +64,7 @@ class DRAMsim3Interface : public Device {
                                             pkt.arrive));
                     pkt.arrive = interface_clock * tick_per_clock;
                 }
-                memsys.AddTransaction(pkt.addr - start, pkt.is_write());
+                memsys.AddTransaction(pkt.dpa, pkt.is_write());
             }
         }
         for (auto it : to_erase) {
@@ -108,7 +108,7 @@ class DRAMsim3Interface : public Device {
 
     // Callback function called by DRAMsim3 when a packet is completed.
     void callback(Addr addr) {
-        auto it = issued.find(addr + start);
+        auto it = issued.find(addr);
         if (it == issued.end())
             return;
         auto &pkt = it->second.front();

@@ -123,7 +123,8 @@ class PktStatsTable {
 struct Packet {
     PktID id;        /* Packet ID */
     PacketType type; /* Packet type */
-    Addr addr;       /* Address */
+    Addr addr;       /* Address (HPA) */
+    Addr dpa;        /* Device Physical Address */
     size_t payload;  /* Payload size (in bytes) */
     size_t burst;    /* Burst size */
     Tick sent;       /* Sent time */
@@ -136,20 +137,20 @@ struct Packet {
         is_sub_pkt; /* Is sub-packet, uses 0 time in bus (packaged by former) */
 
     Packet()
-        : id(-1), type(PKT_TYPE_NUM), addr(0), payload(0), burst(1), sent(0),
-          arrive(0), from(-1), src(-1), dst(-1), is_rsp(false),
+        : id(-1), type(PKT_TYPE_NUM), addr(0), dpa(0), payload(0), burst(1),
+          sent(0), arrive(0), from(-1), src(-1), dst(-1), is_rsp(false),
           is_sub_pkt(false) {}
-    Packet(PktID id, PacketType type, Addr addr, size_t size, size_t burst,
-           Tick sent, Tick arrive, TopoID from, TopoID src, TopoID dst,
-           bool is_rsp, bool is_sub_pkt)
-        : id(id), type(type), addr(addr), payload(size), burst(burst),
-          sent(sent), arrive(std::max(sent, arrive)), from(from), src(src),
-          dst(dst), is_rsp(is_rsp), is_sub_pkt(is_sub_pkt) {}
+    Packet(PktID id, PacketType type, Addr addr, Addr dpa, size_t size,
+           size_t burst, Tick sent, Tick arrive, TopoID from, TopoID src,
+           TopoID dst, bool is_rsp, bool is_sub_pkt)
+        : id(id), type(type), addr(addr), dpa(dpa), payload(size),
+          burst(burst), sent(sent), arrive(std::max(sent, arrive)), from(from),
+          src(src), dst(dst), is_rsp(is_rsp), is_sub_pkt(is_sub_pkt) {}
     Packet(const Packet &pkt)
-        : id(pkt.id), type(pkt.type), addr(pkt.addr), payload(pkt.payload),
-          burst(pkt.burst), sent(pkt.sent), arrive(pkt.arrive), from(pkt.from),
-          src(pkt.src), dst(pkt.dst), is_rsp(pkt.is_rsp),
-          is_sub_pkt(pkt.is_sub_pkt) {}
+        : id(pkt.id), type(pkt.type), addr(pkt.addr), dpa(pkt.dpa),
+          payload(pkt.payload), burst(pkt.burst), sent(pkt.sent),
+          arrive(pkt.arrive), from(pkt.from), src(pkt.src), dst(pkt.dst),
+          is_rsp(pkt.is_rsp), is_sub_pkt(pkt.is_sub_pkt) {}
 
     bool valid() { return id != -1 && type != PKT_TYPE_NUM && type != CORUPT; }
     /**
@@ -208,6 +209,7 @@ class PktBuilder {
     PktID id_i;
     PacketType type_i;
     Addr addr_i;
+    Addr dpa_i;
     size_t payload_i;
     size_t burst_i;
     Tick sent_i;
@@ -220,9 +222,9 @@ class PktBuilder {
 
   public:
     PktBuilder()
-        : type_i(PKT_TYPE_NUM), addr_i(0), payload_i(0), burst_i(1), sent_i(0),
-          arrive_i(0), from_i(-1), src_i(-1), dst_i(-1), is_rsp_i(false),
-          is_sub_pkt_i(false) {
+        : type_i(PKT_TYPE_NUM), addr_i(0), dpa_i(0), payload_i(0), burst_i(1),
+          sent_i(0), arrive_i(0), from_i(-1), src_i(-1), dst_i(-1),
+          is_rsp_i(false), is_sub_pkt_i(false) {
         // Automate the packet ID
         static PktID id = 0;
         id_i = id++;
@@ -236,6 +238,10 @@ class PktBuilder {
     }
     PktBuilder &addr(Addr addr) {
         addr_i = addr;
+        return *this;
+    }
+    PktBuilder &dpa(Addr dpa) {
+        dpa_i = dpa;
         return *this;
     }
     PktBuilder &payload(size_t payload) {
@@ -273,7 +279,7 @@ class PktBuilder {
         return *this;
     }
     Packet build() {
-        return Packet(id_i, type_i, addr_i, payload_i, burst_i, sent_i,
+        return Packet(id_i, type_i, addr_i, dpa_i, payload_i, burst_i, sent_i,
                       arrive_i, from_i, src_i, dst_i, is_rsp_i, is_sub_pkt_i);
     }
 };
