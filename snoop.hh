@@ -617,7 +617,7 @@ class Snoop : public Device {
         filter(pkt);
     }
 
-    void log_stats(std::ostream &os) override {
+    void collect_summary() override {
         double total_conflict = 0;
         for (auto &pair : host_trig_conflict_count) {
             auto &host = pair.first;
@@ -639,6 +639,19 @@ class Snoop : public Device {
         if (total_burst_inv > 0)
             avg_burst_inv /= total_burst_inv;
         device_summary("avg_burst_inv_size", avg_burst_inv);
+    }
+
+    void log_stats(std::ostream &os) override {
+        double avg_burst_inv = 0;
+        double total_burst_inv = 0;
+        for (auto &pair : burst_inv_size_count) {
+            auto &burst = pair.first;
+            auto &count = pair.second;
+            avg_burst_inv += burst * count;
+            total_burst_inv += count;
+        }
+        if (total_burst_inv > 0)
+            avg_burst_inv /= total_burst_inv;
 
         os << name() << " stats:" << std::endl;
         for (auto &pair : host_trig_conflict_count) {

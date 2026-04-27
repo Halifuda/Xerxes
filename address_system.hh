@@ -8,11 +8,13 @@
 
 namespace xerxes {
 
+// MemoryNode lists only memory endpoints. Host DPIDs are directly identified
+// by TopoID in the fabric and are not part of AddressSystem mapping.
 class AddressSystem {
 public:
-    struct Target {
-        TopoID dpid;
+    struct MemoryNode {
         Addr dpa_base;
+        TopoID dpid;
     };
 
     struct Region {
@@ -20,7 +22,7 @@ public:
         size_t hpa_size;
         size_t ways;
         size_t granularity;
-        std::vector<Target> targets;
+        std::vector<MemoryNode> memories;
     };
 
     struct QueryResult {
@@ -39,10 +41,10 @@ public:
                 size_t stripe = offset / region.granularity;
                 size_t target_idx = stripe % region.ways;
                 Addr target_in_stripe = offset % region.granularity;
-                Addr dpa = region.targets[target_idx].dpa_base +
+                Addr dpa = region.memories[target_idx].dpa_base +
                            (stripe / region.ways) * region.granularity +
                            target_in_stripe;
-                return {dpa, region.targets[target_idx].dpid, true};
+                return {dpa, region.memories[target_idx].dpid, true};
             }
         }
         return {0, -1, false};

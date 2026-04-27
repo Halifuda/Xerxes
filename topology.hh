@@ -5,11 +5,15 @@
 #include "def.hh"
 
 #include <list>
+#include <map>
 #include <queue>
 #include <set>
 #include <vector>
 
 namespace xerxes {
+
+class Switch;
+
 // A node in the topology graph, representing a device in the simulation.
 class TopoNode {
     friend class Topology;
@@ -47,10 +51,11 @@ class TopoNode {
 // The topology graph.
 class Topology {
     std::vector<TopoNode> nodes;
-    // next node in a->b route (by default routing)
     std::vector<std::vector<TopoID>> router;
 
   public:
+    enum RoutingPolicy { BFS, WEIGHTED };
+
     // Allocate a new device node.
     TopoID new_node() {
         auto node = TopoNode{};
@@ -130,7 +135,14 @@ class Topology {
             return nullptr;
         return &nodes[router[from][to]];
     }
+
+    void build_pbr_routes(
+        const std::vector<std::pair<TopoID, Switch*>>& switches,
+        const std::vector<TopoID>& endpoints,
+        RoutingPolicy policy = BFS
+    );
 };
+
 } // namespace xerxes
 
 #endif // XERXES_TOPOLOGY_HH

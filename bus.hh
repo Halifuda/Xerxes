@@ -145,7 +145,7 @@ class DuplexBus : public Device {
         send_pkt(pkt);
     }
 
-    void log_stats(std::ostream &os) override {
+    void collect_summary() override {
         double utils = 0;
         double cnt = 0;
         for (auto &from : routes) {
@@ -165,6 +165,22 @@ class DuplexBus : public Device {
         device_summary("avg_utilization", cnt > 0 ? utils / cnt : 0.0);
         device_summary("direction_rev_count",
                        stats["Direction reverse count"]);
+    }
+
+    void log_stats(std::ostream &os) override {
+        double utils = 0;
+        double cnt = 0;
+        for (auto &from : routes) {
+            for (auto &to : from.second) {
+                utils +=
+                    (double)to.second.occupy / (double)to.second.last_occupy;
+                cnt += 1;
+            }
+        }
+        auto eff = stats["Transfered_bytes"] > 0
+                       ? (double)stats["Transfered_payloads"] /
+                             (double)stats["Transfered_bytes"]
+                       : 0.0;
 
         os << name() << " stats: " << std::endl;
         os << "Frame size: " << frame_size << " bytes" << std::endl;

@@ -121,8 +121,7 @@ int main(int argc, char *argv[]) {
         std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     std::cout << "Simulation finished." << std::endl;
     std::cout << "Duration: " << duration.count() << " ms" << std::endl;
-    xerxes::log_stats(std::cerr);
-    xerxes::log_summary(fout);
+    xerxes::log_stats(fout);
     fout << pkt_buffer.str();
     return 0;
 }

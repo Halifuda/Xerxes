@@ -74,6 +74,7 @@ class Device {
     }
 
     virtual void log_stats(std::ostream &os) {}
+    virtual void collect_summary() {}
 
     void device_summary(const std::string &key, double val) {
         sim->system()->add_summary(name_ + ":" + key, val);

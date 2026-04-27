@@ -7,6 +7,7 @@
 #include "requester.hh"
 #include "snoop.hh"
 #include "switch.hh"
+#include "topology.hh"
 #include "utils.hh"
 #include <sstream>
 #include <utility>
@@ -14,8 +15,37 @@
 #include "ext/toml.hpp"
 
 namespace xerxes {
+
+void Topology::build_pbr_routes(
+    const std::vector<std::pair<TopoID, Switch*>>& switches,
+    const std::vector<TopoID>& endpoints,
+    RoutingPolicy policy) {
+
+    for (auto &ep_id : endpoints) {
+        std::queue<TopoID> q;
+        std::map<TopoID, TopoID> parent;
+        q.push(ep_id);
+        while (!q.empty()) {
+            auto cur = q.front(); q.pop();
+            auto node = get_node(cur);
+            if (!node) continue;
+            for (auto &neighbor : node->neighbors()) {
+                if (parent.find(neighbor) == parent.end() && neighbor != ep_id) {
+                    parent[neighbor] = cur;
+                    q.push(neighbor);
+                }
+            }
+        }
+        for (auto &sw_ref : switches) {
+            auto it = parent.find(sw_ref.first);
+            if (it != parent.end())
+                sw_ref.second->set_pbr_route(ep_id, it->second);
+        }
+    }
+}
 Simulation *glb_sim = nullptr;
 std::vector<std::function<void(std::ostream &)>> glb_stat_loggers;
+std::vector<std::function<void()>> glb_stat_summarizers;
 
 void default_logger(const Packet &pkt) {
     static bool first = true;
@@ -99,6 +129,8 @@ bool events_empty() { return glb_engine.empty(); }
             toml::find_or<ConfigType>(data, pair.first, ConfigType{});         \
         auto dev = new TypeName(glb_sim, config, pair.first);                  \
         glb_sim->system()->add_dev(dev);                                       \
+        glb_stat_summarizers.push_back(                                        \
+            [dev]() { dev->collect_summary(); });                              \
         glb_stat_loggers.push_back(                                            \
             [dev](std::ostream &os) { dev->log_stats(os); });                  \
         if (type == "Requester")                                               \
@@ -118,6 +150,7 @@ bool events_empty() { return glb_engine.empty(); }
 XerxesContext parse_config(std::string config_file_name) {
     ASSERT(glb_sim != nullptr, "Simulation is not initialized.");
     glb_stat_loggers.clear();
+    glb_stat_summarizers.clear();
     XerxesContext ctx;
     auto data = toml::parse(config_file_name);
     ctx.general = toml::get<XerxesConfig>(data);
@@ -140,7 +173,6 @@ XerxesContext parse_config(std::string config_file_name) {
         auto to = ctx.name_to_id[pair.second];
         glb_sim->topology()->add_edge(from, to);
     }
-    // Call build route after all devices are added.
     glb_sim->topology()->build_route();
 
     auto as = new AddressSystem();
@@ -150,22 +182,20 @@ XerxesContext parse_config(std::string config_file_name) {
     region.ways = ctx.mems.size();
     region.granularity = 64;
     for (size_t i = 0; i < ctx.mems.size(); ++i) {
-        region.targets.push_back({ctx.mems[i]->id(), 0});
+        region.memories.push_back({0, ctx.mems[i]->id()});
     }
     as->add_region(region);
     glb_sim->set_address_system(as);
 
-    std::vector<FabricManager::EndpointRef> endpoints;
     for (auto *req : ctx.requesters)
-        endpoints.push_back({req->id()});
+        ctx.endpoint_ids.push_back(req->id());
     for (auto *mem : ctx.mems)
-        endpoints.push_back({mem->id()});
+        ctx.endpoint_ids.push_back(mem->id());
     for (auto *snoop : ctx.snoops)
-        endpoints.push_back({snoop->id()});
-    FabricManager::build_routes(
-        glb_sim->topology(),
+        ctx.endpoint_ids.push_back(snoop->id());
+    glb_sim->topology()->build_pbr_routes(
         ctx.switches,
-        endpoints,
+        ctx.endpoint_ids,
         ctx.routing_policy
     );
 
@@ -185,18 +215,10 @@ void log_summary(std::ostream &os) {
 }
 
 void log_stats(std::ostream &os) {
-    // First pass: collect summary silently by running loggers to a dummy stream
-    std::ostringstream dummy;
-    for (auto &logger : glb_stat_loggers) {
-        logger(dummy);
-    }
-    // Print summary
+    for (auto &summarizer : glb_stat_summarizers)
+        summarizer();
     log_summary(os);
-    // Clear so second pass doesn't double-add
-    glb_sim->system()->summary.clear();
-    // Second pass: verbose per-device logs (re-populates summary for file output)
-    for (auto &logger : glb_stat_loggers) {
+    for (auto &logger : glb_stat_loggers)
         logger(os);
-    }
 }
 } // namespace xerxes

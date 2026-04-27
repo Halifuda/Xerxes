@@ -10,13 +10,11 @@ namespace xerxes {
 // Configuration for a switch device.
 class SwitchConfig {
   public:
-    // Delay for each packet to be processed by the switch.
     Tick delay = 1;
-    std::string routing_mode = "bfs";  // "bfs" | "pbr"
 };
 } // namespace xerxes
 
-TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::SwitchConfig, delay, routing_mode);
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::SwitchConfig, delay);
 
 namespace xerxes {
 // n-to-n switch device.
@@ -55,8 +53,7 @@ class Switch : public Device {
     };
 
     Tick delay;
-    std::string routing_mode_str;
-    std::map<TopoID, TopoID> route_table;  // dpid -> next_hop TopoID
+    std::map<TopoID, TopoID> route_table;
     bool pbr_enabled = false;
     // Used for batching packets from upstreams.
     // TODO: should deprecate.
@@ -114,8 +111,7 @@ class Switch : public Device {
   public:
     Switch(Simulation *sim, const SwitchConfig &config,
            std::string name = "Switch")
-        : Device(sim, name), delay(config.delay),
-          routing_mode_str(config.routing_mode) {}
+        : Device(sim, name), delay(config.delay) {}
 
     void add_upstream(TopoID id, Tick delay) {
         upstreams.insert({id, {0, delay}});
@@ -154,8 +150,7 @@ class Switch : public Device {
         }
     }
 
-    void log_stats(std::ostream &os) override {
-        os << name() << " stats:\n";
+    void collect_summary() override {
         for (auto &port : ports) {
             if (upstreams.find(port.first) == upstreams.end())
                 continue;
@@ -166,6 +161,18 @@ class Switch : public Device {
             device_summary("port_" + std::to_string(port.first) +
                                "_avg_queue_depth",
                            avg_qd);
+        }
+    }
+
+    void log_stats(std::ostream &os) override {
+        os << name() << " stats:\n";
+        for (auto &port : ports) {
+            if (upstreams.find(port.first) == upstreams.end())
+                continue;
+            auto avg_qd = port.second.qd_record_cnt > 0
+                              ? port.second.sum_queue_depth /
+                                    port.second.qd_record_cnt
+                              : 0.0;
             os << "Port " << port.first << ":\n";
             os << "  Average queue depth: " << avg_qd << "\n";
         }

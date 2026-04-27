@@ -46,7 +46,7 @@ TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::RequesterConfig, q_capacity,
 
 namespace xerxes {
 class Requester : public Device {
-    class Interleaving {
+    class HpaGenerator {
       protected:
         std::random_device rd;
         std::ranlux48 gen;
@@ -66,7 +66,7 @@ class Requester : public Device {
         size_t block_size;
 
       public:
-        Interleaving(size_t block_size = 64, uint64_t seed = 0)
+        HpaGenerator(size_t block_size = 64, uint64_t seed = 0)
             : block_size(block_size) {
             if (seed != 0) {
                 gen.seed(seed);
@@ -83,7 +83,7 @@ class Requester : public Device {
         virtual bool eof() = 0;
     };
 
-    class Trace : public Interleaving {
+    class Trace : public HpaGenerator {
       public:
         struct TraceReq {
             Addr addr;
@@ -109,7 +109,7 @@ class Requester : public Device {
                     return TraceReq{addr, write_types.count(type) > 0, tick};
                 },
             size_t block_size = 64, uint64_t seed = 0)
-            : Interleaving(block_size, seed), decoder(decoder) {
+            : HpaGenerator(block_size, seed), decoder(decoder) {
             this->trace_file.open(trace_file);
             ASSERT(this->trace_file.is_open(),
                    std::string{"Cannot open trace file"} + trace_file);
@@ -121,13 +121,13 @@ class Requester : public Device {
         }
     };
 
-    class Stream : public Interleaving {
+    class Stream : public HpaGenerator {
         size_t total_count;
         size_t cur_count = 0;
 
       public:
         Stream(size_t total_count, size_t block_size = 64, uint64_t seed = 0)
-            : Interleaving(block_size, seed), total_count(total_count) {}
+            : HpaGenerator(block_size, seed), total_count(total_count) {}
         bool eof() { return cur_count == total_count; }
         Request next() {
             auto n_blocks = hpa_size / block_size;
@@ -139,7 +139,7 @@ class Requester : public Device {
         }
     };
 
-    class Random : public Interleaving {
+    class Random : public HpaGenerator {
         size_t total_count;
         size_t cur_count = 0;
         std::normal_distribution<> norm;
@@ -174,7 +174,7 @@ class Requester : public Device {
         Random(size_t total_count, size_t block_size = 64,
                double hot_req_ratio = 0.5, double hot_region_ratio = 0.5,
                uint64_t seed = 0)
-            : Interleaving(block_size, seed), total_count(total_count),
+            : HpaGenerator(block_size, seed), total_count(total_count),
               hot_req_ratio(hot_req_ratio), hot_region_ratio(hot_region_ratio) {
             norm = std::normal_distribution<>(0.5, 0.5);
         }
@@ -270,7 +270,7 @@ class Requester : public Device {
         void pop(const Packet &pkt) { queue.erase(pkt.id); }
     };
 
-    Interleaving *end_points;
+    HpaGenerator *hpa_gen_;
     IssueQueue q;
     FakeLRUCache cache;
     Tick cur = 0;
@@ -294,36 +294,36 @@ class Requester : public Device {
         XerxesLogger::debug()
             << "Interleave param " << config.interleave_param << std::endl;
         if (config.interleave_type == "stream") {
-            end_points = new Stream{config.interleave_param, config.block_size,
-                                    config.random_seed};
+            hpa_gen_ = new Stream{config.interleave_param, config.block_size,
+                                     config.random_seed};
         } else if (config.interleave_type == "random") {
-            end_points =
+            hpa_gen_ =
                 new Random{config.interleave_param, block_size, 0.5, 0.5,
                            config.random_seed};
         } else if (config.interleave_type == "hotcold") {
-            end_points =
+            hpa_gen_ =
                 new Random{config.interleave_param, block_size,
                            config.hot_req_ratio, config.hot_region_ratio,
                            config.random_seed};
         } else if (config.interleave_type == "trace") {
-            end_points = new Trace{config.trace_file, {}, block_size,
+            hpa_gen_ = new Trace{config.trace_file, {}, block_size,
                                    config.random_seed};
         } else {
             PANIC("Unknown interleave type: " + config.interleave_type);
         }
-        end_points->hpa_base = config.hpa_base;
-        end_points->hpa_size = config.hpa_size;
-        end_points->wr_ratio = config.wr_ratio;
-        if (auto rnd = dynamic_cast<Random *>(end_points))
+        hpa_gen_->hpa_base = config.hpa_base;
+        hpa_gen_->hpa_size = config.hpa_size;
+        hpa_gen_->wr_ratio = config.wr_ratio;
+        if (auto rnd = dynamic_cast<Random *>(hpa_gen_))
             rnd->finalize();
         stats["-1"]["Cache evict count"] = 0;
         stats["-1"]["Cache hit count"] = 0;
     }
 
     Requester &set_hpa_range(Addr base, size_t size) {
-        end_points->hpa_base = base;
-        end_points->hpa_size = size;
-        if (auto rnd = dynamic_cast<Random *>(end_points))
+        hpa_gen_->hpa_base = base;
+        hpa_gen_->hpa_size = size;
+        if (auto rnd = dynamic_cast<Random *>(hpa_gen_))
             rnd->finalize();
         return *this;
     }
@@ -399,7 +399,7 @@ class Requester : public Device {
         return sum;
     }
 
-    void log_stats(std::ostream &os) override {
+    void collect_summary() override {
         double agg_bw = 0;
         double agg_cnt = 0;
         double agg_lat = 0;
@@ -424,7 +424,7 @@ class Requester : public Device {
                                    pair.second["Count"]);
             }
         }
-        device_summary("random_seed", (double)end_points->get_seed());
+        device_summary("random_seed", (double)hpa_gen_->get_seed());
         device_summary("req_count", (double)cur_cnt);
         device_summary("cache_hit_count", stats["-1"]["Cache hit count"]);
         device_summary("cache_evict_count", stats["-1"]["Cache evict count"]);
@@ -433,7 +433,25 @@ class Requester : public Device {
             device_summary("avg_latency_ns", agg_lat / agg_cnt);
             device_summary("avg_evict_wait_ns", agg_wait / agg_cnt);
         }
+    }
 
+    void log_stats(std::ostream &os) override {
+        double agg_bw = 0;
+        double agg_cnt = 0;
+        double agg_lat = 0;
+        double agg_wait = 0;
+        if (last_arrive > 0) {
+            for (auto &pair : stats) {
+                if (pair.first == "-1")
+                    continue;
+                agg_cnt += pair.second["Count"];
+                auto ep_bw =
+                    pair.second["Bandwidth"] / (double)(last_arrive);
+                agg_bw += ep_bw;
+                agg_lat += pair.second["Average latency"];
+                agg_wait += pair.second["Average wait for evict"];
+            }
+        }
         os << name() << " stats: " << std::endl;
         os << " * Payload size: " << block_size << " bytes" << std::endl;
         os << " * Issued packets: " << cur_cnt << std::endl;
@@ -462,13 +480,13 @@ class Requester : public Device {
 
     bool step(bool coherent) {
         static bool ended = false;
-        if (!end_points->eof()) {
+        if (!hpa_gen_->eof()) {
             if (q.full()) {
                 if (cur < last_arrive)
                     cur = last_arrive;
                 return false;
             }
-            auto req = end_points->next();
+            auto req = hpa_gen_->next();
             auto qr = sim->address_system()->query(req.hpa);
             if (!qr.valid) {
                 XerxesLogger::warning()
@@ -543,7 +561,7 @@ class Requester : public Device {
         xerxes_schedule([this]() { this->issue_event(); }, tick);
     }
 
-    bool all_issued() { return end_points->eof(); }
+    bool all_issued() { return hpa_gen_->eof(); }
     bool q_empty() { return q.empty(); }
 };
 } // namespace xerxes
