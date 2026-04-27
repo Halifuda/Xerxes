@@ -618,13 +618,16 @@ class Snoop : public Device {
     }
 
     void log_stats(std::ostream &os) override {
-        os << name() << " stats:" << std::endl;
+        double total_conflict = 0;
         for (auto &pair : host_trig_conflict_count) {
             auto &host = pair.first;
             auto &count = pair.second;
-            os << " * host " << host << " conflict count: " << count
-               << std::endl;
+            total_conflict += count;
+            device_summary("host_" + std::to_string(host) + "_conflict_count",
+                           count);
         }
+        device_summary("total_conflict_count", total_conflict);
+
         double avg_burst_inv = 0;
         double total_burst_inv = 0;
         for (auto &pair : burst_inv_size_count) {
@@ -633,7 +636,17 @@ class Snoop : public Device {
             avg_burst_inv += burst * count;
             total_burst_inv += count;
         }
-        avg_burst_inv /= total_burst_inv;
+        if (total_burst_inv > 0)
+            avg_burst_inv /= total_burst_inv;
+        device_summary("avg_burst_inv_size", avg_burst_inv);
+
+        os << name() << " stats:" << std::endl;
+        for (auto &pair : host_trig_conflict_count) {
+            auto &host = pair.first;
+            auto &count = pair.second;
+            os << " * host " << host << " conflict count: " << count
+               << std::endl;
+        }
         os << " * average burst invalidation size: " << avg_burst_inv
            << std::endl;
 

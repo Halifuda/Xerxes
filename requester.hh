@@ -28,6 +28,7 @@ class RequesterConfig {
     double hot_req_ratio = 0.5;
     double hot_region_ratio = 0.5;
     std::string trace_file = "";
+    uint64_t random_seed = 0;
 };
 } // namespace xerxes
 
@@ -36,7 +37,7 @@ TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::RequesterConfig, q_capacity,
                                        coherent, burst_size, block_size,
                                        interleave_type, interleave_param,
                                        hot_req_ratio, hot_region_ratio,
-                                       trace_file);
+                                       trace_file, random_seed);
 
 namespace xerxes {
 class Requester : public Device {
@@ -46,6 +47,7 @@ class Requester : public Device {
         std::random_device rd;
         std::ranlux48 gen;
         std::uniform_real_distribution<> uni;
+        uint64_t actual_seed;
 
       public:
         struct Request {
@@ -69,10 +71,18 @@ class Requester : public Device {
         size_t block_size;
 
       public:
-        Interleaving(size_t block_size = 64) : block_size(block_size) {
-            gen.seed(rd());
+        Interleaving(size_t block_size = 64, uint64_t seed = 0)
+            : block_size(block_size) {
+            if (seed != 0) {
+                gen.seed(seed);
+                actual_seed = seed;
+            } else {
+                actual_seed = rd();
+                gen.seed(actual_seed);
+            }
             uni = std::uniform_real_distribution<>(0, 1);
         }
+        uint64_t get_seed() const { return actual_seed; }
         size_t size() { return end_points.size(); }
         void push_back(EndPoint ep) {
             ep.cur = ep.start;
@@ -108,8 +118,8 @@ class Requester : public Device {
                     file >> std::hex >> addr >> std::dec >> type >> tick;
                     return TraceReq{addr, write_types.count(type) > 0, tick};
                 },
-            size_t block_size = 64)
-            : Interleaving(block_size), decoder(decoder) {
+            size_t block_size = 64, uint64_t seed = 0)
+            : Interleaving(block_size, seed), decoder(decoder) {
             this->trace_file.open(trace_file);
             ASSERT(this->trace_file.is_open(),
                    std::string{"Cannot open trace file"} + trace_file);
@@ -131,8 +141,8 @@ class Requester : public Device {
         size_t cur_count = 0;
 
       public:
-        Stream(size_t total_count, size_t block_size = 64)
-            : Interleaving(block_size), total_count(total_count) {}
+        Stream(size_t total_count, size_t block_size = 64, uint64_t seed = 0)
+            : Interleaving(block_size, seed), total_count(total_count) {}
         bool eof() { return cur_count == total_count; }
         Request next() {
             auto ep = end_points[cur].id;
@@ -178,8 +188,9 @@ class Requester : public Device {
 
       public:
         Random(size_t total_count, size_t block_size = 64,
-               double hot_req_ratio = 0.5, double hot_region_ratio = 0.5)
-            : Interleaving(block_size), total_count(total_count),
+               double hot_req_ratio = 0.5, double hot_region_ratio = 0.5,
+               uint64_t seed = 0)
+            : Interleaving(block_size, seed), total_count(total_count),
               hot_req_ratio(hot_req_ratio), hot_region_ratio(hot_region_ratio) {
             norm = std::normal_distribution<>(0.5, 0.5);
         }
@@ -302,16 +313,20 @@ class Requester : public Device {
         XerxesLogger::debug()
             << "Interleave param " << config.interleave_param << std::endl;
         if (config.interleave_type == "stream") {
-            end_points = new Stream{config.interleave_param};
+            end_points = new Stream{config.interleave_param, config.block_size,
+                                    config.random_seed};
         } else if (config.interleave_type == "random") {
             end_points =
-                new Random{config.interleave_param, block_size, 0.5, 0.5};
+                new Random{config.interleave_param, block_size, 0.5, 0.5,
+                           config.random_seed};
         } else if (config.interleave_type == "hotcold") {
             end_points =
                 new Random{config.interleave_param, block_size,
-                           config.hot_req_ratio, config.hot_region_ratio};
+                           config.hot_req_ratio, config.hot_region_ratio,
+                           config.random_seed};
         } else if (config.interleave_type == "trace") {
-            end_points = new Trace{config.trace_file};
+            end_points = new Trace{config.trace_file, {}, block_size,
+                                   config.random_seed};
         } else {
             PANIC("Unknown interleave type: " + config.interleave_type);
         }
@@ -407,33 +422,57 @@ class Requester : public Device {
     }
 
     void log_stats(std::ostream &os) override {
+        double agg_bw = 0;
+        double agg_cnt = 0;
+        double agg_lat = 0;
+        double agg_wait = 0;
+        if (last_arrive > 0) {
+            for (auto &pair : stats) {
+                if (pair.first == -1)
+                    continue;
+                agg_cnt += pair.second["Count"];
+                auto ep_bw =
+                    pair.second["Bandwidth"] / (double)(last_arrive);
+                agg_bw += ep_bw;
+                agg_lat += pair.second["Average latency"];
+                agg_wait += pair.second["Average wait for evict"];
+                auto ep = std::to_string(pair.first);
+                device_summary(ep + ":bw_gbps", ep_bw);
+                device_summary(ep + ":avg_latency_ns",
+                               pair.second["Average latency"] /
+                                   pair.second["Count"]);
+                device_summary(ep + ":avg_evict_wait_ns",
+                               pair.second["Average wait for evict"] /
+                                   pair.second["Count"]);
+            }
+        }
+        device_summary("random_seed", (double)end_points->get_seed());
+        device_summary("req_count", (double)cur_cnt);
+        device_summary("cache_hit_count", stats[-1]["Cache hit count"]);
+        device_summary("cache_evict_count", stats[-1]["Cache evict count"]);
+        if (agg_cnt > 0) {
+            device_summary("bw_gbps", agg_bw);
+            device_summary("avg_latency_ns", agg_lat / agg_cnt);
+            device_summary("avg_evict_wait_ns", agg_wait / agg_cnt);
+        }
+
         os << name() << " stats: " << std::endl;
         os << " * Payload size: " << block_size << " bytes" << std::endl;
         os << " * Issued packets: " << cur_cnt << std::endl;
         os << " * Evict count: " << stats[-1]["Cache evict count"] << std::endl;
         os << " * Hit count: " << stats[-1]["Cache hit count"] << std::endl;
-        double agg_bw = 0;
-        double agg_cnt = 0;
-        double agg_lat = 0;
-        double agg_wait = 0;
         for (auto &pair : stats) {
             if (pair.first == -1)
                 continue;
-            agg_cnt += pair.second["Count"];
             os << " * Endpoint " << pair.first << ": " << std::endl;
             os << "   - Bandwidth (GB/s): "
                << pair.second["Bandwidth"] / (double)(last_arrive) << std::endl;
-            agg_bw += pair.second["Bandwidth"] / (double)(last_arrive);
-
             os << "   - Average latency (ns): "
                << pair.second["Average latency"] / pair.second["Count"]
                << std::endl;
-            agg_lat += pair.second["Average latency"];
-
             os << "   - Average wait for evict (ns): "
                << pair.second["Average wait for evict"] / pair.second["Count"]
                << std::endl;
-            agg_wait += pair.second["Average wait for evict"];
         }
         os << " * Aggregate: " << std::endl;
         os << "   - Bandwidth (GB/s): " << agg_bw << std::endl;

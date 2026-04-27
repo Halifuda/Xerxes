@@ -48,6 +48,7 @@ class Requester(Device):
             "hot_req_ratio": 0.5,
             "hot_region_ratio": 0.5,
             "trace_file": "",
+            "random_seed": 0,
         }
 
 class DuplexBus(Device):

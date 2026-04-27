@@ -75,6 +75,10 @@ class Device {
 
     virtual void log_stats(std::ostream &os) {}
 
+    void device_summary(const std::string &key, double val) {
+        sim->system()->add_summary(name_ + ":" + key, val);
+    }
+
     auto get_transit_func() {
         return [this]() { transit(); };
     }

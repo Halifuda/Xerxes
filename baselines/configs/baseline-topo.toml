@@ -1,0 +1,178 @@
+max_clock = 3000000
+clock_granu = 1
+log_level = "INFO"
+log_name = "baselines/baseline-topo.csv"
+edges = [
+    [
+        "Host-0",
+        "Switch-0",
+    ],
+    [
+        "Switch-0",
+        "Mem-0",
+    ],
+    [
+        "Host-1",
+        "Switch-1",
+    ],
+    [
+        "Switch-1",
+        "Mem-1",
+    ],
+    [
+        "Switch-0",
+        "Switch-1",
+    ],
+    [
+        "Host-2",
+        "Switch-2",
+    ],
+    [
+        "Switch-2",
+        "Mem-2",
+    ],
+    [
+        "Switch-1",
+        "Switch-2",
+    ],
+    [
+        "Host-3",
+        "Switch-3",
+    ],
+    [
+        "Switch-3",
+        "Mem-3",
+    ],
+    [
+        "Switch-2",
+        "Switch-3",
+    ],
+    [
+        "Switch-3",
+        "Switch-0",
+    ],
+]
+
+[devices]
+Host-0 = "Requester"
+Host-1 = "Requester"
+Host-2 = "Requester"
+Host-3 = "Requester"
+Mem-0 = "DRAMsim3Interface"
+Mem-1 = "DRAMsim3Interface"
+Mem-2 = "DRAMsim3Interface"
+Mem-3 = "DRAMsim3Interface"
+Switch-0 = "Switch"
+Switch-1 = "Switch"
+Switch-2 = "Switch"
+Switch-3 = "Switch"
+
+[Host-0]
+q_capacity = 32
+cache_capacity = 8192
+cache_delay = 12
+issue_delay = 0
+coherent = false
+burst_size = 1
+block_size = 64
+interleave_type = "stream"
+interleave_param = 500
+hot_req_ratio = 0.5
+hot_region_ratio = 0.5
+trace_file = ""
+random_seed = 42
+
+[Host-1]
+q_capacity = 32
+cache_capacity = 8192
+cache_delay = 12
+issue_delay = 0
+coherent = false
+burst_size = 1
+block_size = 64
+interleave_type = "stream"
+interleave_param = 500
+hot_req_ratio = 0.5
+hot_region_ratio = 0.5
+trace_file = ""
+random_seed = 42
+
+[Host-2]
+q_capacity = 32
+cache_capacity = 8192
+cache_delay = 12
+issue_delay = 0
+coherent = false
+burst_size = 1
+block_size = 64
+interleave_type = "stream"
+interleave_param = 500
+hot_req_ratio = 0.5
+hot_region_ratio = 0.5
+trace_file = ""
+random_seed = 42
+
+[Host-3]
+q_capacity = 32
+cache_capacity = 8192
+cache_delay = 12
+issue_delay = 0
+coherent = false
+burst_size = 1
+block_size = 64
+interleave_type = "stream"
+interleave_param = 500
+hot_req_ratio = 0.5
+hot_region_ratio = 0.5
+trace_file = ""
+random_seed = 42
+
+[Mem-0]
+tick_per_clock = 1
+process_time = 40
+start = 0
+capacity = 1073741824
+wr_ratio = 0.0
+config_file = "DRAMsim3/configs/DDR4_8Gb_x8_3200.ini"
+output_dir = "output"
+
+[Mem-1]
+tick_per_clock = 1
+process_time = 40
+start = 0
+capacity = 1073741824
+wr_ratio = 0.0
+config_file = "DRAMsim3/configs/DDR4_8Gb_x8_3200.ini"
+output_dir = "output"
+
+[Mem-2]
+tick_per_clock = 1
+process_time = 40
+start = 0
+capacity = 1073741824
+wr_ratio = 0.0
+config_file = "DRAMsim3/configs/DDR4_8Gb_x8_3200.ini"
+output_dir = "output"
+
+[Mem-3]
+tick_per_clock = 1
+process_time = 40
+start = 0
+capacity = 1073741824
+wr_ratio = 0.0
+config_file = "DRAMsim3/configs/DDR4_8Gb_x8_3200.ini"
+output_dir = "output"
+
+[Switch-0]
+delay = 25
+
+[Switch-1]
+delay = 25
+
+[Switch-2]
+delay = 25
+
+[Switch-3]
+delay = 25
+
+

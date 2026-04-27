@@ -1,0 +1,69 @@
+max_clock = 3000000
+clock_granu = 1
+log_level = "INFO"
+log_name = "baselines/baseline-bus.csv"
+edges = [
+    [
+        "Host-0",
+        "Switch-1",
+    ],
+    [
+        "Switch-2",
+        "Mem-0",
+    ],
+    [
+        "Switch-1",
+        "Bus",
+    ],
+    [
+        "Bus",
+        "Switch-2",
+    ],
+]
+
+[devices]
+Host-0 = "Requester"
+Mem-0 = "DRAMsim3Interface"
+Switch-1 = "Switch"
+Switch-2 = "Switch"
+Bus = "DuplexBus"
+
+[Host-0]
+q_capacity = 32
+cache_capacity = 8192
+cache_delay = 12
+issue_delay = 0
+coherent = false
+burst_size = 1
+block_size = 64
+interleave_type = "random"
+interleave_param = 500
+hot_req_ratio = 0.5
+hot_region_ratio = 0.5
+trace_file = ""
+random_seed = 42
+
+[Mem-0]
+tick_per_clock = 1
+process_time = 40
+start = 0
+capacity = 1073741824
+wr_ratio = 0.0
+config_file = "DRAMsim3/configs/DDR4_8Gb_x8_3200.ini"
+output_dir = "output"
+
+[Switch-1]
+delay = 0
+
+[Switch-2]
+delay = 0
+
+[Bus]
+is_full = true
+half_rev_time = 100
+delay_per_T = 1
+width = 32
+framing_time = 20
+frame_size = 64
+
+

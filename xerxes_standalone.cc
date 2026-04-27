@@ -7,6 +7,7 @@
 #include "snoop.hh"
 #include "switch.hh"
 #include "utils.hh"
+#include <sstream>
 #include <utility>
 
 #include "ext/toml.hpp"
@@ -148,7 +149,26 @@ XerxesContext parse_config(std::string config_file_name) {
     return ctx;
 }
 
+void log_summary(std::ostream &os) {
+    auto &s = glb_sim->system()->summary;
+    if (s.empty()) return;
+    os << "metric,value" << std::endl;
+    for (auto &e : s) {
+        os << e.first << "," << e.second << std::endl;
+    }
+}
+
 void log_stats(std::ostream &os) {
+    // First pass: collect summary silently by running loggers to a dummy stream
+    std::ostringstream dummy;
+    for (auto &logger : glb_stat_loggers) {
+        logger(dummy);
+    }
+    // Print summary
+    log_summary(os);
+    // Clear so second pass doesn't double-add
+    glb_sim->system()->summary.clear();
+    // Second pass: verbose per-device logs (re-populates summary for file output)
     for (auto &logger : glb_stat_loggers) {
         logger(os);
     }

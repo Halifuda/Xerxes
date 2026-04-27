@@ -6,6 +6,7 @@
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 
 using namespace std;
 
@@ -30,9 +31,10 @@ int main(int argc, char *argv[]) {
     std::cout << "Config file: " << config_file << std::endl;
 
     auto ctx = xerxes::parse_config(config_file);
+    // Buffer per-packet data so summary can be written first
+    std::ostringstream pkt_buffer;
     auto fout = std::fstream(ctx.general.log_name, std::ios::out);
-    // Set packet logger, which logs the latency components of each request.
-    xerxes::set_pkt_logger(fout,
+    xerxes::set_pkt_logger(pkt_buffer,
                            xerxes::str_to_log_level(ctx.general.log_level));
 
     auto &config = ctx.general;
@@ -120,5 +122,7 @@ int main(int argc, char *argv[]) {
     std::cout << "Simulation finished." << std::endl;
     std::cout << "Duration: " << duration.count() << " ms" << std::endl;
     xerxes::log_stats(std::cerr);
+    xerxes::log_summary(fout);
+    fout << pkt_buffer.str();
     return 0;
 }

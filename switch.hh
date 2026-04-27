@@ -140,10 +140,15 @@ class Switch : public Device {
         for (auto &port : ports) {
             if (upstreams.find(port.first) == upstreams.end())
                 continue;
+            auto avg_qd = port.second.qd_record_cnt > 0
+                              ? port.second.sum_queue_depth /
+                                    port.second.qd_record_cnt
+                              : 0.0;
+            device_summary("port_" + std::to_string(port.first) +
+                               "_avg_queue_depth",
+                           avg_qd);
             os << "Port " << port.first << ":\n";
-            os << "  Average queue depth: "
-               << port.second.sum_queue_depth / port.second.qd_record_cnt
-               << "\n";
+            os << "  Average queue depth: " << avg_qd << "\n";
         }
     }
 

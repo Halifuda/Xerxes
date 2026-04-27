@@ -146,15 +146,6 @@ class DuplexBus : public Device {
     }
 
     void log_stats(std::ostream &os) override {
-        os << name() << " stats: " << std::endl;
-        os << "Frame size: " << frame_size << " bytes" << std::endl;
-        for (auto &stat : stats) {
-            os << std::fixed << stat.first << ": " << stat.second << std::endl;
-        }
-        os << "Efficiency: "
-           << (double)stats["Transfered_payloads"] /
-                  (double)stats["Transfered_bytes"]
-           << std::endl;
         double utils = 0;
         double cnt = 0;
         for (auto &from : routes) {
@@ -164,6 +155,23 @@ class DuplexBus : public Device {
                 cnt += 1;
             }
         }
+        auto eff = stats["Transfered_bytes"] > 0
+                       ? (double)stats["Transfered_payloads"] /
+                             (double)stats["Transfered_bytes"]
+                       : 0.0;
+        device_summary("transferred_bytes", stats["Transfered_bytes"]);
+        device_summary("transferred_payloads", stats["Transfered_payloads"]);
+        device_summary("efficiency", eff);
+        device_summary("avg_utilization", cnt > 0 ? utils / cnt : 0.0);
+        device_summary("direction_rev_count",
+                       stats["Direction reverse count"]);
+
+        os << name() << " stats: " << std::endl;
+        os << "Frame size: " << frame_size << " bytes" << std::endl;
+        for (auto &stat : stats) {
+            os << std::fixed << stat.first << ": " << stat.second << std::endl;
+        }
+        os << "Efficiency: " << eff << std::endl;
         os << "Average utilization: " << utils / cnt << std::endl;
     }
 
