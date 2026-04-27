@@ -3,8 +3,10 @@
 #define XERXES_SNOOP_HH
 
 #include "device.hh"
+#include "event_log.hh"
 #include "utils.hh"
 
+#include <algorithm>
 #include <map>
 #include <random>
 #include <set>
@@ -347,6 +349,7 @@ class Snoop : public Device {
 
     SnoopEviction *eviction;
     bool log_inv = false;
+    TimedEventLog eviction_log_;
 
     enum State {
         EXCLUSIVE,   // single owner, clean
@@ -508,6 +511,7 @@ class Snoop : public Device {
         }
         back_inv_count += 1;
         total_inv_packets += inv_targets.size();
+        eviction_log_.log(tick, {(double)burst, (double)owner});
     }
 
     void evict(size_t set_i, Tick tick) {
@@ -688,7 +692,9 @@ class Snoop : public Device {
           std::string name = "Snoop")
         : Device(sim, name), line_num(config.line_num), assoc(config.assoc),
           set_num(config.line_num / config.assoc),
-          max_burst_inv(config.max_burst_inv), log_inv(false) {
+          max_burst_inv(config.max_burst_inv), log_inv(false),
+          eviction_log_(name + "_eviction", {"burst_size", "target_host"}) {
+        sim->register_event_log(&eviction_log_);
         ASSERT(line_num % assoc == 0, "snoop: size % assoc != 0");
         cache.resize(set_num);
         for (auto &c : cache)
@@ -776,6 +782,31 @@ class Snoop : public Device {
             for (auto &pair : sharer_dist)
                 device_summary("evict_sharers_" + std::to_string(pair.first),
                                pair.second);
+        }
+
+        if (!eviction_log_.empty()) {
+            auto &rows = eviction_log_.rows();
+            Tick window = 5000;
+            std::map<Tick, size_t> window_counts;
+            for (auto &row : rows) {
+                Tick w = (row.first / window) * window;
+                window_counts[w] += 1;
+            }
+            std::vector<double> rates;
+            for (auto &wc : window_counts)
+                rates.push_back((double)wc.second);
+            if (!rates.empty()) {
+                std::sort(rates.begin(), rates.end());
+                device_summary("inv_rate_p50",
+                    rates[rates.size() * 50 / 100]);
+                device_summary("inv_rate_p99",
+                    rates[rates.size() * 99 / 100]);
+                device_summary("inv_rate_max", rates.back());
+                double avg_rate = 0;
+                for (auto r : rates) avg_rate += r;
+                avg_rate /= rates.size();
+                device_summary("inv_rate_avg", avg_rate);
+            }
         }
     }
 

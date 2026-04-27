@@ -123,5 +123,7 @@ int main(int argc, char *argv[]) {
     std::cout << "Duration: " << duration.count() << " ms" << std::endl;
     xerxes::log_stats(fout);
     fout << pkt_buffer.str();
+    // Dump timed event logs
+    sim.dump_event_logs(ctx.general.log_name);
     return 0;
 }

@@ -3,7 +3,9 @@
 #define XERXES_SWITCH_HH
 
 #include "device.hh"
+#include "event_log.hh"
 
+#include <algorithm>
 #include <unordered_set>
 
 namespace xerxes {
@@ -53,6 +55,7 @@ class Switch : public Device {
     };
 
     Tick delay;
+    TimedEventLog qdepth_log_;
     std::map<TopoID, TopoID> route_table;
     bool pbr_enabled = false;
     // Used for batching packets from upstreams.
@@ -111,7 +114,10 @@ class Switch : public Device {
   public:
     Switch(Simulation *sim, const SwitchConfig &config,
            std::string name = "Switch")
-        : Device(sim, name), delay(config.delay) {}
+        : Device(sim, name), delay(config.delay),
+          qdepth_log_(name + "_qdepth", {"port", "queue_depth"}) {
+        sim->register_event_log(&qdepth_log_);
+    }
 
     void add_upstream(TopoID id, Tick delay) {
         upstreams.insert({id, {0, delay}});
@@ -137,6 +143,7 @@ class Switch : public Device {
         port.sum_queue_depth += port.queues[pkt.from].size();
         port.qd_record_cnt += 1;
         port.queues[pkt.from].push(pkt);
+        qdepth_log_.log(pkt.arrive, {(double)port.id, (double)port.queues[pkt.from].size()});
 
         if (upstreams.find(port.id) != upstreams.end()) {
             upstreams[port.id].first++;
@@ -161,6 +168,31 @@ class Switch : public Device {
             device_summary("port_" + std::to_string(port.first) +
                                "_avg_queue_depth",
                            avg_qd);
+        }
+
+        std::map<TopoID, std::vector<double>> depths_by_port;
+        for (auto &row : qdepth_log_.rows()) {
+            double port_id = row.second[0];
+            double depth = row.second[1];
+            depths_by_port[(TopoID)port_id].push_back(depth);
+        }
+        for (auto &pair : depths_by_port) {
+            auto &depths = pair.second;
+            if (depths.empty()) continue;
+            std::sort(depths.begin(), depths.end());
+            double p50 = depths[depths.size() * 50 / 100];
+            double p99 = depths[depths.size() * 99 / 100];
+            double max_val = depths.back();
+            size_t exceed_count = 0;
+            for (auto d : depths) {
+                if (d > 8) exceed_count++;
+            }
+            double exceed_ratio = depths.empty() ? 0.0 :
+                (double)exceed_count / depths.size();
+            device_summary("port_" + std::to_string(pair.first) + "_qdepth_p50", p50);
+            device_summary("port_" + std::to_string(pair.first) + "_qdepth_p99", p99);
+            device_summary("port_" + std::to_string(pair.first) + "_qdepth_max", max_val);
+            device_summary("port_" + std::to_string(pair.first) + "_qdepth_exceed_ratio", exceed_ratio);
         }
     }
 
