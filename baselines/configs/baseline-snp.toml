@@ -1,7 +1,7 @@
 max_clock = 3000000
 clock_granu = 1
 log_level = "INFO"
-log_name = "baselines/baseline-snp.csv"
+log_name = "output/baseline-snp.csv"
 edges = [
     [
         "Host-0",
