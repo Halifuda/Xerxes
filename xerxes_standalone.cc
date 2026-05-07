@@ -9,6 +9,8 @@
 #include "switch.hh"
 #include "topology.hh"
 #include "utils.hh"
+#include <functional>
+#include <limits>
 #include <sstream>
 #include <utility>
 
@@ -21,21 +23,70 @@ void Topology::build_pbr_routes(
     const std::vector<TopoID>& endpoints,
     RoutingPolicy policy) {
 
+    if (policy == BFS) {
+        for (auto &ep_id : endpoints) {
+            std::queue<TopoID> q;
+            std::map<TopoID, TopoID> parent;
+            q.push(ep_id);
+            while (!q.empty()) {
+                auto cur = q.front(); q.pop();
+                auto node = get_node(cur);
+                if (!node) continue;
+                for (auto &neighbor : node->neighbors()) {
+                    if (parent.find(neighbor) == parent.end() && neighbor != ep_id) {
+                        parent[neighbor] = cur;
+                        q.push(neighbor);
+                    }
+                }
+            }
+            for (auto &sw_ref : switches) {
+                auto it = parent.find(sw_ref.first);
+                if (it != parent.end())
+                    sw_ref.second->set_pbr_route(ep_id, it->second);
+            }
+        }
+        return;
+    }
+
+    // WEIGHTED / BANDWIDTH_AWARE: Dijkstra from each endpoint outward.
     for (auto &ep_id : endpoints) {
-        std::queue<TopoID> q;
+        std::map<TopoID, double> dist;
         std::map<TopoID, TopoID> parent;
-        q.push(ep_id);
-        while (!q.empty()) {
-            auto cur = q.front(); q.pop();
+
+        using PQEntry = std::pair<double, TopoID>;
+        std::priority_queue<PQEntry, std::vector<PQEntry>,
+                            std::greater<PQEntry>> pq;
+
+        dist[ep_id] = 0;
+        pq.push({0, ep_id});
+
+        while (!pq.empty()) {
+            auto [cur_dist, cur] = pq.top();
+            pq.pop();
+            if (cur_dist > dist[cur])
+                continue;
+
             auto node = get_node(cur);
-            if (!node) continue;
+            if (!node)
+                continue;
+
             for (auto &neighbor : node->neighbors()) {
-                if (parent.find(neighbor) == parent.end() && neighbor != ep_id) {
+                if (neighbor == ep_id)
+                    continue;
+                double ew = edge_cost(cur, neighbor);
+                if (policy == BANDWIDTH_AWARE)
+                    ew = (ew > 0) ? (1.0 / ew) : std::numeric_limits<double>::max();
+
+                double new_dist = cur_dist + ew;
+                auto it = dist.find(neighbor);
+                if (it == dist.end() || new_dist < it->second) {
+                    dist[neighbor] = new_dist;
                     parent[neighbor] = cur;
-                    q.push(neighbor);
+                    pq.push({new_dist, neighbor});
                 }
             }
         }
+
         for (auto &sw_ref : switches) {
             auto it = parent.find(sw_ref.first);
             if (it != parent.end())
@@ -154,6 +205,15 @@ XerxesContext parse_config(std::string config_file_name) {
     XerxesContext ctx;
     auto data = toml::parse(config_file_name);
     ctx.general = toml::get<XerxesConfig>(data);
+
+    auto rp = toml::find_or(data, "routing_policy", std::string("bfs"));
+    if (rp == "weighted")
+        ctx.routing_policy = Topology::WEIGHTED;
+    else if (rp == "bandwidth_aware")
+        ctx.routing_policy = Topology::BANDWIDTH_AWARE;
+    else
+        ctx.routing_policy = Topology::BFS;
+
     for (auto &pair : ctx.general.devices) {
         auto type = pair.second;
         if (type == "SthUknown") {
@@ -172,6 +232,13 @@ XerxesContext parse_config(std::string config_file_name) {
         auto from = ctx.name_to_id[pair.first];
         auto to = ctx.name_to_id[pair.second];
         glb_sim->topology()->add_edge(from, to);
+    }
+    auto edge_costs = toml::find_or(data, "edge_costs",
+                                    std::vector<EdgeCostEntry>{});
+    for (auto &ec : edge_costs) {
+        auto from = ctx.name_to_id[ec.from];
+        auto to = ctx.name_to_id[ec.to];
+        glb_sim->topology()->set_edge_cost(from, to, ec.cost);
     }
     glb_sim->topology()->build_route();
 

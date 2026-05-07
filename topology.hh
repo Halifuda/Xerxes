@@ -4,6 +4,7 @@
 
 #include "def.hh"
 
+#include <limits>
 #include <list>
 #include <map>
 #include <queue>
@@ -20,6 +21,7 @@ class TopoNode {
 
     TopoID self;
     std::set<TopoID> neighbors_;
+    std::map<TopoID, double> edge_costs_;
     std::list<Packet> buffer;
 
   public:
@@ -45,7 +47,17 @@ class TopoNode {
 
     const std::set<TopoID> &neighbors() { return neighbors_; }
 
+    double edge_cost(TopoID neighbor) const {
+        auto it = edge_costs_.find(neighbor);
+        return (it != edge_costs_.end()) ? it->second : 1.0;
+    }
+
     TopoID id() { return self; }
+
+  private:
+    void set_edge_cost(TopoID neighbor, double cost) {
+        edge_costs_[neighbor] = cost;
+    }
 };
 
 // The topology graph.
@@ -54,7 +66,7 @@ class Topology {
     std::vector<std::vector<TopoID>> router;
 
   public:
-    enum RoutingPolicy { BFS, WEIGHTED };
+    enum RoutingPolicy { BFS, WEIGHTED, BANDWIDTH_AWARE };
 
     // Allocate a new device node.
     TopoID new_node() {
@@ -65,13 +77,30 @@ class Topology {
     }
 
     // Add a new edge between two nodes.
-    Topology *add_edge(TopoID first, TopoID second) {
+    Topology *add_edge(TopoID first, TopoID second, double cost = 1.0) {
         if (first < 0 || second < 0 || (size_t)first >= nodes.size() ||
             (size_t)second >= nodes.size())
             return this;
         nodes[first].neighbors_.insert(second);
         nodes[second].neighbors_.insert(first);
+        nodes[first].set_edge_cost(second, cost);
+        nodes[second].set_edge_cost(first, cost);
         return this;
+    }
+
+    void set_edge_cost(TopoID first, TopoID second, double cost) {
+        if (first >= 0 && second >= 0 && (size_t)first < nodes.size() &&
+            (size_t)second < nodes.size()) {
+            nodes[first].set_edge_cost(second, cost);
+            nodes[second].set_edge_cost(first, cost);
+        }
+    }
+
+    double edge_cost(TopoID from, TopoID to) const {
+        if (from < 0 || to < 0 || (size_t)from >= nodes.size() ||
+            (size_t)to >= nodes.size())
+            return std::numeric_limits<double>::infinity();
+        return nodes[from].edge_cost(to);
     }
 
     // Build the default routing table.

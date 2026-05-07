@@ -14,6 +14,13 @@ namespace xerxes {
 class Switch;
 class Snoop;
 
+// Edge cost entry for TOML config: [["from", "to", cost], ...].
+struct EdgeCostEntry {
+    std::string from;
+    std::string to;
+    double cost = 1.0;
+};
+
 // General configurations for a Xerxes simulation.
 struct XerxesConfig {
     // Max clocking times.
@@ -75,6 +82,8 @@ void log_stats(std::ostream &os);
 // Log summary metrics only (CSV format).
 void log_summary(std::ostream &os);
 } // namespace xerxes
+
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::EdgeCostEntry, from, to, cost);
 
 TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::XerxesConfig, max_clock,
                                        clock_granu, log_level, log_name,
