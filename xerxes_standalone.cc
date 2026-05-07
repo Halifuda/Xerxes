@@ -319,9 +319,6 @@ XerxesContext parse_config(std::string config_file_name) {
         ctx.routing_policy
     );
 
-    for (auto &req : ctx.requesters) {
-        req->set_hpa_range(0, 1ULL << 30);
-    }
     return ctx;
 }
 
