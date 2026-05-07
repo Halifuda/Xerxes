@@ -243,15 +243,68 @@ XerxesContext parse_config(std::string config_file_name) {
     glb_sim->topology()->build_route();
 
     auto as = new AddressSystem();
-    AddressSystem::Region region;
-    region.hpa_start = 0;
-    region.hpa_size = 1ULL << 30;
-    region.ways = ctx.mems.size();
-    region.granularity = 64;
-    for (size_t i = 0; i < ctx.mems.size(); ++i) {
-        region.memories.push_back({0, ctx.mems[i]->id()});
+
+    auto has_as = data.contains("address_system");
+    if (!has_as) {
+        AddressSystem::Region region;
+        region.hpa_start = 0;
+        region.hpa_size = 1ULL << 30;
+        region.ways = ctx.mems.size();
+        region.granularity = 64;
+        for (size_t i = 0; i < ctx.mems.size(); ++i)
+            region.memories.push_back({0, ctx.mems[i]->id()});
+        as->add_region(region);
+    } else {
+        auto as_data = toml::find<toml::value>(data, "address_system");
+        auto grouped = toml::find_or(as_data, "grouped", false);
+
+        if (grouped) {
+            AddressSystem::Region region;
+            region.hpa_start =
+                toml::find_or(as_data, "hpa_start", (Addr)0);
+            region.hpa_size =
+                toml::find_or(as_data, "hpa_size", (size_t)(1ULL << 30));
+            region.grouped = true;
+            region.group_granularity =
+                toml::find_or(as_data, "group_granularity", (size_t)256);
+
+            auto groups_data = toml::find<std::vector<toml::value>>(
+                as_data, "groups");
+            for (auto &gv : groups_data) {
+                AddressSystem::Group group;
+                group.ways = toml::find_or(gv, "ways", (size_t)1);
+                group.granularity =
+                    toml::find_or(gv, "granularity", (size_t)64);
+                auto mem_names =
+                    toml::find<std::vector<std::string>>(gv, "memories");
+                for (auto &name : mem_names)
+                    group.memories.push_back({0, ctx.name_to_id[name]});
+                region.groups.push_back(group);
+            }
+            as->add_region(region);
+        } else {
+            AddressSystem::Region region;
+            region.hpa_start =
+                toml::find_or(as_data, "hpa_start", (Addr)0);
+            region.hpa_size =
+                toml::find_or(as_data, "hpa_size", (size_t)(1ULL << 30));
+            region.ways =
+                toml::find_or(as_data, "ways", ctx.mems.size());
+            region.granularity =
+                toml::find_or(as_data, "granularity", (size_t)64);
+            auto mem_names = toml::find_or(
+                as_data, "memories", std::vector<std::string>{});
+            if (mem_names.empty()) {
+                for (size_t i = 0; i < ctx.mems.size(); ++i)
+                    region.memories.push_back({0, ctx.mems[i]->id()});
+            } else {
+                for (auto &name : mem_names)
+                    region.memories.push_back(
+                        {0, ctx.name_to_id[name]});
+            }
+            as->add_region(region);
+        }
     }
-    as->add_region(region);
     glb_sim->set_address_system(as);
 
     for (auto *req : ctx.requesters)

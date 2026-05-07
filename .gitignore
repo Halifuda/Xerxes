@@ -1,6 +1,7 @@
 # TGT
 build/
 debug/
+output/
 
 
 .cache/

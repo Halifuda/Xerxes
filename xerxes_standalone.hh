@@ -21,6 +21,28 @@ struct EdgeCostEntry {
     double cost = 1.0;
 };
 
+// Group configuration for grouped interleave in AddressSystem.
+struct GroupConfig {
+    size_t ways = 0;
+    size_t granularity = 64;
+    std::vector<std::string> memories;
+};
+
+// Address system configuration, parsed from [address_system] TOML section.
+// When absent, flat interleave with all mems at 64B granularity is used.
+struct AddressSystemConfig {
+    Addr hpa_start = 0;
+    size_t hpa_size = 1ULL << 30;
+    bool grouped = false;
+    // Flat mode
+    size_t ways = 0;
+    size_t granularity = 64;
+    std::vector<std::string> memories;
+    // Grouped mode
+    size_t group_granularity = 0;
+    std::vector<GroupConfig> groups;
+};
+
 // General configurations for a Xerxes simulation.
 struct XerxesConfig {
     // Max clocking times.
@@ -84,6 +106,13 @@ void log_summary(std::ostream &os);
 } // namespace xerxes
 
 TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::EdgeCostEntry, from, to, cost);
+
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::GroupConfig, ways, granularity,
+                                       memories);
+
+TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::AddressSystemConfig, hpa_start,
+                                       hpa_size, grouped, ways, granularity,
+                                       memories, group_granularity, groups);
 
 TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::XerxesConfig, max_clock,
                                        clock_granu, log_level, log_name,
