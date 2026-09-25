@@ -45,14 +45,25 @@ if HAS_PANDAS:
         'snoop_evict'
     ]
 
+    # Logs start with a "metric,value" summary block followed by the per-request
+    # table. Locate the request header so the summary block can be skipped.
+    def find_request_header(path):
+        with open(path, 'r') as fh:
+            for lineno, line in enumerate(fh):
+                if line.startswith("id,type"):
+                    return lineno
+        return 0
+
+    skip = find_request_header(file)
+
     # Read CSV robustly to avoid mixed-type NaNs from chunked inference
     try:
         dtype_map = {c: 'float64' for c in numeric_cols}
         dtype_map['type'] = 'string'
-        data = pd.read_csv(file, dtype=dtype_map, low_memory=False)
+        data = pd.read_csv(file, skiprows=skip, dtype=dtype_map, low_memory=False)
     except Exception:
         # Fallback if headers differ; disable low_memory to stabilize dtypes
-        data = pd.read_csv(file, low_memory=False)
+        data = pd.read_csv(file, skiprows=skip, low_memory=False)
 
     # Coerce numeric columns; keep only rows with valid numeric values where needed
     for c in numeric_cols:
