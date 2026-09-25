@@ -121,7 +121,13 @@ class Requester : public Device {
         }
         Request next() {
             auto req = decoder(trace_file);
-            return {req.addr, req.is_write, req.tick};
+            // Fold the raw trace address into this requester's HPA window, as
+            // Stream/Random already do. Real-machine traces carry addresses far
+            // outside [hpa_base, hpa_base + hpa_size); without this they map to
+            // no AddressSystem region and every request is dropped.
+            Addr hpa = (hpa_size != 0) ? (req.addr % hpa_size) + hpa_base
+                                       : req.addr + hpa_base;
+            return {hpa, req.is_write, req.tick};
         }
     };
 
