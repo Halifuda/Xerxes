@@ -2,6 +2,10 @@
 
 This is a CXL-enabled memory system simulator. 
 
+The artifact-evaluation snapshot of the FAST conference version is frozen in the
+separate `FAST-AE` branch. This `main` branch tracks the current development
+version.
+
 
 # Build
 
