@@ -96,25 +96,29 @@ class Requester : public Device {
         std::function<TraceReq(std::ifstream &)> decoder;
 
       public:
+        static TraceReq default_decode(std::ifstream &file) {
+            static std::unordered_set<std::string> write_types = {
+                "W", "WR", "WRITE", "write", "P_MEM_WR", "BOFF"};
+            std::string type;
+            Addr addr;
+            Tick tick;
+            file >> std::hex >> addr >> std::dec >> type >> tick;
+            return TraceReq{addr, write_types.count(type) > 0, tick};
+        }
+
         Trace(
             std::string trace_file,
-            std::function<TraceReq(std::ifstream &)> decoder =
-                [](std::ifstream &file) {
-                    static std::unordered_set<std::string> write_types = {
-                        "W", "WR", "WRITE", "write", "P_MEM_WR", "BOFF"};
-                    std::string type;
-                    Addr addr;
-                    Tick tick;
-                    file >> std::hex >> addr >> std::dec >> type >> tick;
-                    return TraceReq{addr, write_types.count(type) > 0, tick};
-                },
+            std::function<TraceReq(std::ifstream &)> decoder = default_decode,
             size_t block_size = 64, uint64_t seed = 0)
             : HpaGenerator(block_size, seed), decoder(decoder) {
             this->trace_file.open(trace_file);
             ASSERT(this->trace_file.is_open(),
                    std::string{"Cannot open trace file"} + trace_file);
         }
-        bool eof() { return trace_file.eof(); }
+        bool eof() {
+            trace_file >> std::ws;
+            return trace_file.eof();
+        }
         Request next() {
             auto req = decoder(trace_file);
             return {req.addr, req.is_write, req.tick};
@@ -222,31 +226,50 @@ class Requester : public Device {
     };
 
     class FakeLRUCache {
-        std::list<Addr> cache;
+        struct Entry {
+            Addr addr;
+            bool writable;
+        };
+
+        std::list<Entry> cache;
 
       public:
         size_t capacity;
         Tick delay;
         FakeLRUCache(size_t capacity, Tick delay)
             : capacity(capacity), delay(delay) {}
-        void insert(Addr addr) {
+        void insert(Addr addr, bool writable) {
+            for (auto it = cache.begin(); it != cache.end(); ++it) {
+                if (it->addr == addr) {
+                    it->writable = it->writable || writable;
+                    auto entry = *it;
+                    cache.erase(it);
+                    cache.push_back(entry);
+                    return;
+                }
+            }
             if (cache.size() >= capacity)
                 cache.pop_front();
-            cache.push_back(addr);
+            cache.push_back({addr, writable});
         }
-        bool hit(Addr addr) {
-            auto it = std::find(cache.begin(), cache.end(), addr);
-            if (it != cache.end()) {
-                cache.erase(it);
-                cache.push_back(addr);
-                return true;
+        bool hit(Addr addr, bool is_write) {
+            for (auto it = cache.begin(); it != cache.end(); ++it) {
+                if (it->addr == addr && (!is_write || it->writable)) {
+                    auto entry = *it;
+                    cache.erase(it);
+                    cache.push_back(entry);
+                    return true;
+                }
             }
             return false;
         }
         void invalidate(Addr addr) {
-            auto it = std::find(cache.begin(), cache.end(), addr);
-            if (it != cache.end())
-                cache.erase(it);
+            for (auto it = cache.begin(); it != cache.end(); ++it) {
+                if (it->addr == addr) {
+                    cache.erase(it);
+                    return;
+                }
+            }
         }
     };
 
@@ -306,7 +329,7 @@ class Requester : public Device {
                            config.hot_req_ratio, config.hot_region_ratio,
                            config.random_seed};
         } else if (config.interleave_type == "trace") {
-            hpa_gen_ = new Trace{config.trace_file, {}, block_size,
+            hpa_gen_ = new Trace{config.trace_file, Trace::default_decode, block_size,
                                    config.random_seed};
         } else {
             PANIC("Unknown interleave type: " + config.interleave_type);
@@ -336,8 +359,12 @@ class Requester : public Device {
                     << name() << " receive packet " << pkt.id
                     << ", issue queue is full? " << q.full() << std::endl;
                 last_arrive = pkt.arrive;
-                if (coherent)
-                    cache.insert(pkt.addr);
+                if (coherent) {
+                    for (size_t i = 0; i < pkt.burst; ++i) {
+                        cache.insert(pkt.addr + i * block_size,
+                                     pkt.exclusive_grant || pkt.is_write());
+                    }
+                }
 
                 auto dram_key = std::to_string(pkt.src);
                 if (stats.find(dram_key) == stats.end()) {
@@ -359,8 +386,9 @@ class Requester : public Device {
                 pkt.log_stat();
             } else if (pkt.type == INV) {
                 if (coherent) {
-                    cache.invalidate(pkt.addr);
-                    stats["-1"]["Cache evict count"] += 1;
+                    for (size_t i = 0; i < pkt.burst; ++i)
+                        cache.invalidate(pkt.addr + i * block_size);
+                    stats["-1"]["Cache evict count"] += pkt.burst;
                     std::swap(pkt.src, pkt.dst);
                     pkt.is_rsp = true;
                     pkt.payload = block_size * pkt.burst;
@@ -497,7 +525,7 @@ class Requester : public Device {
             cur += issue_delay;
             if (req.tick != 0)
                 cur = req.tick;
-            if (coherent && cache.hit(req.hpa)) {
+            if (coherent && cache.hit(req.hpa, req.is_write)) {
                 auto dram_key = std::to_string(qr.dpid);
                 if (stats.find(dram_key) == stats.end()) {
                     stats[dram_key] = {};

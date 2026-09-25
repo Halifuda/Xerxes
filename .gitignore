@@ -2,10 +2,17 @@
 build/
 debug/
 output/
+!output/
+output/*
+!output/report.py
+!output/congestion_correlation.py
 
 
 .cache/
 configs/mkcfg/__pycache__/
 
 output/fig*/
-output/baseline-*.csvoutput/dramsim3epoch.json
+output/baseline-*.csv
+output/dramsim3epoch.json
+
+results/
