@@ -28,6 +28,7 @@ typedef enum {
     NT_WT,  /* Non-temporal write */
     INV,    /* Invalidate (to Host) */
     CORUPT, /* Corrupted packet */
+    CLN_EVCT, /* Clean eviction notification (MemClnEvct) */
     PKT_TYPE_NUM
 } PacketType;
 
@@ -47,6 +48,8 @@ class TypeName {
             return std::string("Invalidate");
         case CORUPT:
             return std::string("*Corruptted*");
+        case CLN_EVCT:
+            return std::string("Clean evict");
         default:
             return std::string("*unknown packet type*");
         }

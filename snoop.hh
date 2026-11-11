@@ -19,13 +19,57 @@ class SnoopConfig {
     size_t line_num = 1024;
     size_t assoc = 8;
     size_t max_burst_inv = 8;
+    // How a burst eviction picks the lines that share one BISnp command.
+    // "centered" (default) grows the run symmetrically around the victim, up
+    // to max_burst_inv lines on each side; the block length is therefore at
+    // most 2 * max_burst_inv + 1, and every config written before this switch
+    // keeps its exact behaviour.  "run" treats max_burst_inv as the total
+    // block length: it extends the contiguous run that contains the victim
+    // (forward first, then backward) until the block reaches max_burst_inv
+    // lines, so achievable lengths are 1..N instead of 1, 3, 5, ...
+    std::string burst_mode = "centered";
+    // Victim selection for block invalidation: "policy" lets the configured
+    // eviction policy choose (historical behaviour), "longest_run" scans the
+    // set for the evictable line with the longest contiguous run.
+    std::string victim_select = "policy";
     std::vector<std::pair<Addr, Addr>> ranges;
     std::string eviction = "LRU";
+    // Mix the line number before taking it modulo the set count.  Off by
+    // default: the historical set_of() is (addr / 64) % set_num, so existing
+    // configs must keep bucketing exactly as before.
+    bool index_hash = false;
 };
 } // namespace xerxes
 
-TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::SnoopConfig, line_num, assoc,
-                                       max_burst_inv, ranges, eviction);
+// Hand-written instead of TOML11_DEFINE_CONVERSION_NON_INTRUSIVE.  That macro
+// reads every listed key with toml::find(), so appending a field to the list
+// makes any config file written before the field existed throw from
+// from_toml(); parse_config() calls find_or<SnoopConfig>() and silently
+// substitutes a default-constructed SnoopConfig, discarding the whole [Snoop]
+// section.  The documented keys therefore stay mandatory, while the newer
+// index_hash switch is optional so old configs parse unchanged.
+namespace toml {
+template <> struct from<xerxes::SnoopConfig> {
+    template <typename TC>
+    static xerxes::SnoopConfig from_toml(const basic_value<TC> &v) {
+        xerxes::SnoopConfig obj;
+        obj.line_num = find<decltype(obj.line_num)>(v, "line_num");
+        obj.assoc = find<decltype(obj.assoc)>(v, "assoc");
+        obj.max_burst_inv =
+            find<decltype(obj.max_burst_inv)>(v, "max_burst_inv");
+        // Optional: unlike the keys above, omitting burst_mode must keep the
+        // historical centered search rather than discard the [Snoop] section.
+        obj.burst_mode = find_or<std::string>(v, "burst_mode", "centered");
+        obj.victim_select =
+            find_or<std::string>(v, "victim_select", "policy");
+        obj.ranges = find<decltype(obj.ranges)>(v, "ranges");
+        obj.eviction = find<decltype(obj.eviction)>(v, "eviction");
+        // Optional: config files predating this switch omit the key entirely.
+        obj.index_hash = find_or<bool>(v, "index_hash", false);
+        return obj;
+    }
+};
+} // namespace toml
 
 namespace xerxes {
 // 1-to-1 device, used ahead a memory endpoint to perform snooping.
@@ -38,7 +82,11 @@ class Snoop : public Device {
         size_t setn;
 
       public:
-        std::function<bool(size_t, size_t)> is_valid;
+        // A way is a legal victim only if it holds a resident line that is
+        // not already being evicted or waiting on a DRAM response.  The
+        // predicate lives in the policy so every find_victim() applies the
+        // same filter to its own queue/histogram.
+        std::function<bool(size_t, size_t)> is_evictable;
         std::function<size_t(size_t, size_t)> sharer_count;
 
         SnoopEviction() {}
@@ -96,13 +144,22 @@ class Snoop : public Device {
         }
 
         ssize_t find_victim(size_t set_i, bool do_evict) override {
-            if (queues[set_i].empty())
-                return -1;
-            auto victim = queues[set_i].back();
-            if (do_evict)
-                queues[set_i].pop_back();
-            return victim;
+            auto &q = queues[set_i];
+            // Only a resident, idle line may be chosen.  Invalid ways have no
+            // owner to invalidate, and EVICTING/WAIT_DRAM ways already have a
+            // request in flight.  The way stays queued; it is removed when the
+            // line is really invalidated (on_invalidate).
+            for (auto it = q.rbegin(); it != q.rend(); ++it) {
+                if (!is_evictable(set_i, *it))
+                    continue;
+                auto victim = *it;
+                if (do_evict)
+                    q.erase(std::next(it).base());
+                return victim;
+            }
+            return -1;
         }
+
     };
 
     class LIFO : public FIFO {
@@ -113,12 +170,16 @@ class Snoop : public Device {
           The front of the queue is the last inserted way.
         */
         ssize_t find_victim(size_t set_i, bool do_evict) override {
-            if (queues[set_i].empty())
-                return -1;
-            auto victim = queues[set_i].front();
-            if (do_evict)
-                queues[set_i].pop_front();
-            return victim;
+            auto &q = queues[set_i];
+            for (auto it = q.begin(); it != q.end(); ++it) {
+                if (!is_evictable(set_i, *it))
+                    continue;
+                auto victim = *it;
+                if (do_evict)
+                    q.erase(it);
+                return victim;
+            }
+            return -1;
         }
     };
 
@@ -173,12 +234,16 @@ class Snoop : public Device {
         MRU() : LRU() {}
 
         ssize_t find_victim(size_t set_i, bool do_evict) override {
-            if (queues[set_i].empty())
-                return -1;
-            auto victim = queues[set_i].front();
-            if (do_evict)
-                queues[set_i].pop_front();
-            return victim;
+            auto &q = queues[set_i];
+            for (auto it = q.begin(); it != q.end(); ++it) {
+                if (!is_evictable(set_i, *it))
+                    continue;
+                auto victim = *it;
+                if (do_evict)
+                    q.erase(it);
+                return victim;
+            }
+            return -1;
         }
     };
 
@@ -249,8 +314,10 @@ class Snoop : public Device {
             if (queues[set_i].empty())
                 return -1;
             size_t ecnt = INT_MAX;
-            size_t victim = -1;
+            ssize_t victim = -1;
             for (auto &e : queues[set_i]) {
+                if (!is_evictable(set_i, e.way_i))
+                    continue;
                 size_t k = 0;
                 if (insert_cnt.find(e.addr) != insert_cnt.end())
                     k = insert_cnt[e.addr];
@@ -259,10 +326,12 @@ class Snoop : public Device {
                     victim = e.way_i;
                 }
             }
+            if (victim == -1)
+                return -1;
             if (do_evict) {
                 auto &q = queues[set_i];
                 for (auto it = q.begin(); it != q.end(); ++it) {
-                    if (it->way_i == victim) {
+                    if ((ssize_t)it->way_i == victim) {
                         q.erase(it);
                         break;
                     }
@@ -270,6 +339,7 @@ class Snoop : public Device {
             }
             return victim;
         }
+
     };
 
     class RandomPolicy : public SnoopEviction {
@@ -284,7 +354,7 @@ class Snoop : public Device {
         ssize_t find_victim(size_t set_i, bool do_evict) override {
             std::vector<size_t> valid;
             for (size_t i = 0; i < assoc; ++i) {
-                if (is_valid(set_i, i))
+                if (is_evictable(set_i, i))
                     valid.push_back(i);
             }
             if (valid.empty())
@@ -302,7 +372,7 @@ class Snoop : public Device {
             ssize_t victim = -1;
             size_t min_sharers = SIZE_MAX;
             for (size_t i = 0; i < assoc; ++i) {
-                if (!is_valid(set_i, i))
+                if (!is_evictable(set_i, i))
                     continue;
                 size_t cnt = sharer_count(set_i, i);
                 if (cnt < min_sharers) {
@@ -319,17 +389,23 @@ class Snoop : public Device {
         FewestSharersThenLIFO() : LIFO() {}
 
         ssize_t find_victim(size_t set_i, bool do_evict) override {
+            // Compute the minimum over the candidate queue, not over every
+            // valid way: a way that is not queued (e.g. an in-flight
+            // WAIT_DRAM line) must not lower the bar to a value no queued
+            // way can match, which would leave the caller with no victim.
+            auto &q = queues[set_i];
             size_t min_sharers = SIZE_MAX;
-            for (size_t i = 0; i < assoc; ++i) {
-                if (!is_valid(set_i, i))
+            for (auto &w : q) {
+                if (!is_evictable(set_i, w))
                     continue;
-                size_t cnt = sharer_count(set_i, i);
+                size_t cnt = sharer_count(set_i, w);
                 if (cnt < min_sharers)
                     min_sharers = cnt;
             }
-            auto &q = queues[set_i];
+            if (min_sharers == SIZE_MAX)
+                return -1;
             for (auto it = q.begin(); it != q.end(); ++it) {
-                if (is_valid(set_i, *it) &&
+                if (is_evictable(set_i, *it) &&
                     sharer_count(set_i, *it) == min_sharers) {
                     auto victim = *it;
                     if (do_evict)
@@ -346,17 +422,19 @@ class Snoop : public Device {
         FewestSharersThenFIFO() : FIFO() {}
 
         ssize_t find_victim(size_t set_i, bool do_evict) override {
+            auto &q = queues[set_i];
             size_t min_sharers = SIZE_MAX;
-            for (size_t i = 0; i < assoc; ++i) {
-                if (!is_valid(set_i, i))
+            for (auto &w : q) {
+                if (!is_evictable(set_i, w))
                     continue;
-                size_t cnt = sharer_count(set_i, i);
+                size_t cnt = sharer_count(set_i, w);
                 if (cnt < min_sharers)
                     min_sharers = cnt;
             }
-            auto &q = queues[set_i];
+            if (min_sharers == SIZE_MAX)
+                return -1;
             for (auto it = q.rbegin(); it != q.rend(); ++it) {
-                if (is_valid(set_i, *it) &&
+                if (is_evictable(set_i, *it) &&
                     sharer_count(set_i, *it) == min_sharers) {
                     auto victim = *it;
                     if (do_evict)
@@ -373,17 +451,19 @@ class Snoop : public Device {
         FewestSharersThenLRU() : LRU() {}
 
         ssize_t find_victim(size_t set_i, bool do_evict) override {
+            auto &q = queues[set_i];
             size_t min_sharers = SIZE_MAX;
-            for (size_t i = 0; i < assoc; ++i) {
-                if (!is_valid(set_i, i))
+            for (auto &w : q) {
+                if (!is_evictable(set_i, w))
                     continue;
-                size_t cnt = sharer_count(set_i, i);
+                size_t cnt = sharer_count(set_i, w);
                 if (cnt < min_sharers)
                     min_sharers = cnt;
             }
-            auto &q = queues[set_i];
+            if (min_sharers == SIZE_MAX)
+                return -1;
             for (auto it = q.rbegin(); it != q.rend(); ++it) {
-                if (is_valid(set_i, *it) &&
+                if (is_evictable(set_i, *it) &&
                     sharer_count(set_i, *it) == min_sharers) {
                     auto victim = *it;
                     if (do_evict)
@@ -401,6 +481,15 @@ class Snoop : public Device {
     size_t set_num;
 
     size_t max_burst_inv;
+
+    // "centered" or "run"; see SnoopConfig::burst_mode.
+    std::string burst_mode;
+
+    // "policy" or "longest_run"; see SnoopConfig::victim_select.
+    std::string victim_select;
+
+    // Optional line-number mixing in set_of(); see SnoopConfig::index_hash.
+    bool index_hash;
 
     SnoopEviction *eviction;
     bool log_inv = false;
@@ -442,11 +531,34 @@ class Snoop : public Device {
     size_t total_inv_packets = 0;
     std::vector<size_t> evict_sharers_list;
 
-    size_t set_of(Addr addr) { return (addr / 64) % set_num; }
+    // How often evict() ran; the denominator for policy-level victim counts.
+    size_t evict_total_count_ = 0;
 
-    bool line_has_holder(const Line &line, TopoID host) const {
-        return line.valid &&
-               (line.owner == host || line.sharers.find(host) != line.sharers.end());
+    // Clean eviction notifications handled by this snoop.
+    size_t cln_evct_rx = 0;
+    size_t cln_evct_free = 0;
+    size_t cln_evct_drop_sharer = 0;
+    size_t cln_evct_promote = 0;
+    size_t cln_evct_stale = 0;
+    size_t cln_evct_busy = 0;
+    size_t cln_evct_dirty_reject = 0;
+    size_t cln_evct_out_of_range = 0;
+
+    // The set index is a pure function of the line address, and every cache
+    // access, clean-evict handler and burst eviction goes through here.  By
+    // default the low line bits pick the bucket, which couples the set index
+    // to the address layout: changing set_num re-buckets every line and can
+    // produce eviction spikes that are an artifact, not a capacity effect.
+    // index_hash mixes the line number first so a set-count sweep samples
+    // the same address stream evenly.
+    size_t set_of(Addr addr) {
+        size_t line = addr / 64;
+        if (index_hash) {
+            line ^= line >> 33;
+            line *= 0xff51afd7ed558ccdULL;
+            line ^= line >> 33;
+        }
+        return line % set_num;
     }
 
     ssize_t hit_addr(Addr addr) {
@@ -478,30 +590,10 @@ class Snoop : public Device {
         return find_addr_owner(addr, owner, false);
     }
 
-    ssize_t hit_addr_holder(Addr addr, TopoID host) {
-        auto set_i = set_of(addr);
-        for (ssize_t i = 0; i < (ssize_t)assoc; ++i) {
-            auto &line = cache[set_i][i];
-            if (line.valid && line.addr == addr && line_has_holder(line, host)) {
-                if (eviction)
-                    eviction->on_hit(addr, set_i, i);
-                return i;
-            }
-        }
-        return -1;
-    }
-
     void note_conflict(TopoID host) {
         if (host_trig_conflict_count.find(host) == host_trig_conflict_count.end())
             host_trig_conflict_count[host] = 0;
         host_trig_conflict_count[host] += 1;
-    }
-
-    void send_grant(Packet pkt, bool exclusive_grant) {
-        std::swap(pkt.src, pkt.dst);
-        pkt.is_rsp = true;
-        pkt.exclusive_grant = exclusive_grant;
-        send_pkt(pkt);
     }
 
     ssize_t new_way(Addr addr) {
@@ -538,7 +630,33 @@ class Snoop : public Device {
 
     // Check how long a burst eviction starting at addr can be performed.
     // TODO: hard-coded block size 64
+    // Block length = total lines, not lines per side: extend the contiguous
+    // run that contains the victim, forward first and then backward.
+    std::pair<Addr, size_t> peek_burst_run(Addr addr, TopoID owner) {
+        size_t max_len = max_burst_inv == 0 ? 1 : max_burst_inv;
+        size_t burst = 1;
+        auto begin_addr = addr;
+        auto end_addr = addr;
+        while (burst < max_len) {
+            if (probe_addr_owner(end_addr + 64, owner) == -1)
+                break;
+            end_addr += 64;
+            burst += 1;
+        }
+        while (burst < max_len) {
+            if (begin_addr < 64)
+                break;
+            if (probe_addr_owner(begin_addr - 64, owner) == -1)
+                break;
+            begin_addr -= 64;
+            burst += 1;
+        }
+        return {begin_addr, burst};
+    }
+
     std::pair<Addr, size_t> peek_burst_evict(Addr addr, TopoID owner) {
+        if (burst_mode == "run")
+            return peek_burst_run(addr, owner);
         size_t burst = 1;
         auto begin_addr = addr;
         auto end_addr = addr;
@@ -571,7 +689,8 @@ class Snoop : public Device {
                              Tick tick, size_t victim_sharers,
                              size_t set_i, Addr victim_addr) {
         std::set<TopoID> inv_targets;
-        inv_targets.insert(owner);
+        if (owner >= 0)
+            inv_targets.insert(owner);
         for (size_t i = 0; i < burst; ++i) {
             auto way = probe_addr_owner(start + i * 64, owner);
             if (way != -1) {
@@ -585,12 +704,18 @@ class Snoop : public Device {
                     eviction->on_evict(line.addr,
                                        set_of(start + i * 64),
                                        way);
+                if (line.owner >= 0)
+                    inv_targets.insert(line.owner);
                 for (auto &sharer : line.sharers)
-                    inv_targets.insert(sharer);
+                    if (sharer >= 0)
+                        inv_targets.insert(sharer);
                 evict_sharers_list.push_back(line.sharers.size());
             }
         }
+        size_t sent_inv = 0;
         for (auto &target : inv_targets) {
+            if (target < 0 || target == self)
+                continue;
             auto inv = PktBuilder()
                            .type(PacketType::INV)
                            .addr(start)
@@ -606,9 +731,10 @@ class Snoop : public Device {
                 << name() << ": evict packet " << inv.id << ", addr " << start
                 << ", burst " << burst << ", target " << target << std::endl;
             send_pkt(inv);
+            ++sent_inv;
         }
         back_inv_count += 1;
-        total_inv_packets += inv_targets.size();
+        total_inv_packets += sent_inv;
         eviction_log_.log(
             tick,
             {(double)burst, (double)owner, (double)victim_sharers,
@@ -617,8 +743,42 @@ class Snoop : public Device {
 
     void evict(size_t set_i, Tick tick) {
         ASSERT(eviction != nullptr, name() + ": eviction policy is null");
+        ++evict_total_count_;
         auto &set = cache[set_i];
-        auto victim = eviction->find_victim(set_i, true);
+        // Select without popping: the victim keeps its queue slot until the
+        // line is really invalidated in free_way().  Popping here used to lose
+        // the way whenever its DRAM response settled the line in place, which
+        // left a full set with no policy candidate.
+        auto victim = eviction->find_victim(set_i, false);
+        if (victim_select == "longest_run") {
+            // Block-length-prioritised selection: prefer the evictable line
+            // whose contiguous run is the longest, so a single InvBlk clears
+            // as many cachelines as possible.  Ties keep the policy victim.
+            ssize_t best = -1;
+            size_t best_len = 0;
+            if (victim != -1 && eviction->is_evictable(set_i, victim)) {
+                best = victim;
+                best_len = peek_burst_evict(set[victim].addr,
+                                            set[victim].owner)
+                               .second;
+            }
+            for (size_t w = 0; w < assoc; ++w) {
+                if ((ssize_t)w == best)
+                    continue;
+                auto &cand = set[w];
+                if (!cand.valid)
+                    continue;
+                if (!eviction->is_evictable(set_i, w))
+                    continue;
+                size_t len = peek_burst_evict(cand.addr, cand.owner).second;
+                if (len > best_len) {
+                    best = (ssize_t)w;
+                    best_len = len;
+                }
+            }
+            if (best != -1)
+                victim = best;
+        }
         XerxesLogger::debug() << name() << ": evict victim [" << set_i << ": "
                               << victim << "]" << std::endl;
         if (victim != -1) {
@@ -634,59 +794,63 @@ class Snoop : public Device {
             conduct_burst_evict(peek.first, peek.second, line.owner, tick,
                                 line.sharers.size(), set_i, line.addr);
         } else {
-            // No victim, do nothing.
+            // No policy candidate.  A free way can still exist (e.g. one was
+            // released after the allocation parked), so hand it over if so.
+            reclaim_free_way(set_i, tick);
         }
     }
 
     void coherent_request(Packet pkt) {
         auto set_i = set_of(pkt.addr);
 
-        // 1. Same host already has it -> hit, return immediately
-        auto way_i = hit_addr_holder(pkt.addr, pkt.src);
+        // The snoop is a coherence filter, not a data cache: every coherent
+        // request must be served by the memory device.  A hit only supplies
+        // the metadata (the holders already recorded for the line) that the
+        // response will need.
+        auto way_i = hit_addr(pkt.addr);
         if (way_i != -1) {
             auto &line = cache[set_i][way_i];
-            if (!pkt.is_write()) {
-                send_grant(pkt, line.state != SHARED && line.owner == pkt.src);
+            if (line.state == EVICTING) {
+                // An eviction of this line is already in flight.  Leave its
+                // bookkeeping alone: free_way() will hand the way to the
+                // waiter parked by that eviction.  This request still goes to
+                // memory, the only place that can serve it.
+                XerxesLogger::debug()
+                    << name() << ": pkt " << pkt.id << " forward evicting ["
+                    << set_i << ":" << way_i << "]" << std::endl;
+                send_pkt(pkt);
                 return;
             }
-            if (line.state != SHARED && line.owner == pkt.src) {
-                send_grant(pkt, true);
+            // A write needs the line to itself, so any other holder is evicted
+            // first through the existing conflict path; free_way() then wakes
+            // the parked request and forwards it to memory.
+            bool other_holders =
+                line.owner != pkt.src || !line.sharers.empty();
+            if (pkt.is_write() && other_holders) {
+                note_conflict(pkt.src);
+                XerxesLogger::debug()
+                    << name() << ": pkt " << pkt.id << " conflict [" << set_i
+                    << ":" << way_i << "]" << std::endl;
+                waiting[set_i].insert({pkt.id, {pkt, (size_t)way_i}});
+                auto peek = peek_burst_evict(line.addr, line.owner);
+                conduct_burst_evict(peek.first, peek.second, line.owner,
+                                    pkt.arrive, line.sharers.size(), set_i,
+                                    line.addr);
                 return;
             }
-            note_conflict(pkt.src);
+            // Forward to memory while remembering the previous holders as
+            // sharers.  The response branch turns a non-empty sharer set into
+            // SHARED and an empty one into EXCLUSIVE.
+            std::set<TopoID> holders = line.sharers;
+            holders.erase(pkt.src);
+            if (line.owner >= 0 && line.owner != pkt.src)
+                holders.insert(line.owner);
             XerxesLogger::debug()
-                << name() << ": pkt " << pkt.id << " upgrade [" << set_i
+                << name() << ": pkt " << pkt.id << " forward hit [" << set_i
                 << ":" << way_i << "]" << std::endl;
-            waiting[set_i].insert({pkt.id, {pkt, (size_t)way_i}});
-            auto peek = peek_burst_evict(line.addr, line.owner);
-            conduct_burst_evict(peek.first, peek.second, line.owner,
-                                pkt.arrive, line.sharers.size(), set_i,
-                                line.addr);
-            return;
-        }
-
-        // 2. Different host has it.
-        way_i = hit_addr(pkt.addr);
-        if (way_i != -1) {
-            auto &line = cache[set_i][way_i];
-            if (!pkt.is_write() && line.state != WAIT_DRAM &&
-                line.state != EVICTING && !line_has_holder(line, pkt.src)) {
-                line.state = SHARED;
-                line.sharers.erase(line.owner);
-                line.sharers.insert(pkt.src);
-                send_grant(pkt, false);
-                return;
-            }
-            note_conflict(pkt.src);
-            XerxesLogger::debug()
-                << name() << ": pkt " << pkt.id << " conflict [" << set_i << ":"
-                << way_i << "]" << std::endl;
-            waiting[set_i].insert(
-                {pkt.id, {pkt, (size_t)way_i}});
-            auto peek = peek_burst_evict(line.addr, line.owner);
-            conduct_burst_evict(peek.first, peek.second, line.owner,
-                                pkt.arrive, line.sharers.size(), set_i,
-                                line.addr);
+            update(pkt.addr, set_i, way_i, pkt.src, WAIT_DRAM, true, true);
+            cache[set_i][way_i].sharers = holders;
+            send_pkt(pkt);
             return;
         }
 
@@ -708,6 +872,56 @@ class Snoop : public Device {
         send_pkt(pkt);
     }
 
+    // Free the line at [set_i:way_i] and wake up one waiter for that way.
+    void free_way(size_t set_i, size_t way_i, Tick tick) {
+        // Invalidate the line.
+        update(0, set_i, way_i, -1, INVALID, false);
+
+        // Check waiting for this evicted way.
+        for (auto it = waiting[set_i].begin(); it != waiting[set_i].end();
+             ++it) {
+            auto &entry = it->second;
+            if (entry.target_way == way_i || entry.target_way == assoc) {
+                auto &waiter = entry.pkt;
+                XerxesLogger::debug()
+                    << name() << ": insert waiter pkt " << waiter.id
+                    << " to [" << set_i << ":" << way_i << "]" << std::endl;
+                update(waiter.addr, set_i, way_i, waiter.src, WAIT_DRAM, true,
+                       true);
+                if (tick > waiter.arrive) {
+                    waiter.delta_stat(SNOOP_EVICT_DELAY,
+                                      (double)(tick - waiter.arrive));
+                    waiter.arrive = tick;
+                }
+                send_pkt(waiter);
+                waiting[set_i].erase(it);
+                break;
+            }
+        }
+    }
+
+    // If a way is already free and an allocation waiter is parked in this
+    // set, hand the way over immediately.  The wake does not depend on an INV
+    // response: a response that no longer matches its line (the line may have
+    // been freed in the meantime) must not strand the waiter.
+    void reclaim_free_way(size_t set_i, Tick tick) {
+        bool assoc_waiter = false;
+        for (auto &kv : waiting[set_i]) {
+            if (kv.second.target_way == assoc) {
+                assoc_waiter = true;
+                break;
+            }
+        }
+        if (!assoc_waiter)
+            return;
+        for (size_t w = 0; w < assoc; ++w) {
+            if (!cache[set_i][w].valid) {
+                free_way(set_i, w, tick);
+                return;
+            }
+        }
+    }
+
     void invalidate_response(Packet pkt) {
         if (log_inv)
             pkt.log_stat();
@@ -717,34 +931,9 @@ class Snoop : public Device {
         for (size_t i = 0; i < burst; ++i) {
             auto set_i = set_of(addr + i * 64);
             auto way_i = probe_addr_owner(addr + i * 64, pkt.src);
-            if (way_i != -1) {
-                // Invalidate the line.
-                update(0, set_i, way_i, -1, INVALID, false);
-
-                // Check waiting for this evicted way.
-                for (auto it = waiting[set_i].begin();
-                     it != waiting[set_i].end(); ++it) {
-                    auto &entry = it->second;
-                    if (entry.target_way == (size_t)way_i ||
-                        entry.target_way == assoc) {
-                        auto &waiter = entry.pkt;
-                        XerxesLogger::debug()
-                            << name() << ": insert waiter pkt " << waiter.id
-                            << " to [" << set_i << ":" << way_i << "]"
-                            << std::endl;
-                        update(waiter.addr, set_i, way_i, waiter.src,
-                               WAIT_DRAM, true, true);
-                        if (tick > waiter.arrive) {
-                            waiter.delta_stat(SNOOP_EVICT_DELAY,
-                                              (double)(tick - waiter.arrive));
-                            waiter.arrive = tick;
-                        }
-                        send_pkt(waiter);
-                        waiting[set_i].erase(it);
-                        break;
-                    }
-                }
-            }
+            if (way_i != -1)
+                free_way(set_i, (size_t)way_i, tick);
+            reclaim_free_way(set_i, tick);
         }
     }
 
@@ -756,7 +945,64 @@ class Snoop : public Device {
         return false;
     }
 
+    // Handle a clean eviction notification.  It is a one-way notification
+    // from a host cache that silently dropped a clean line; the snoop sits
+    // inline on the path to memory, so it consumes the packet here.
+    void handle_clean_evict(Packet pkt) {
+        auto addr = pkt.addr;
+        ++cln_evct_rx;
+        if (!in_range(addr)) {
+            ++cln_evct_out_of_range;
+            return;
+        }
+        auto set_i = set_of(addr);
+        auto way = hit_addr(addr);
+        if (way == -1) {
+            // The snoop already evicted this line; the notification is stale.
+            ++cln_evct_stale;
+            return;
+        }
+        auto way_i = (size_t)way;
+        auto &line = cache[set_i][way_i];
+        if (line.state == WAIT_DRAM || line.state == EVICTING) {
+            // The way belongs to an in-flight waiter; it must not be freed.
+            ++cln_evct_busy;
+            return;
+        }
+        if (line.owner == pkt.src) {
+            if (line.dirty || line.state == MODIFIED) {
+                // A clean eviction must never drop a dirty line.
+                ++cln_evct_dirty_reject;
+                return;
+            }
+            if (!line.sharers.empty()) {
+                // Promote a sharer to owner instead of freeing the line.
+                auto it = line.sharers.begin();
+                auto new_owner = *it;
+                line.sharers.erase(it);
+                auto new_state = line.sharers.empty() ? EXCLUSIVE : SHARED;
+                update(addr, set_i, way_i, new_owner, new_state, true, true);
+                ++cln_evct_promote;
+            } else {
+                free_way(set_i, way_i, pkt.arrive);
+                ++cln_evct_free;
+            }
+        } else if (line.sharers.find(pkt.src) != line.sharers.end()) {
+            line.sharers.erase(pkt.src);
+            ++cln_evct_drop_sharer;
+        } else {
+            ++cln_evct_stale;
+        }
+    }
+
     void filter(Packet pkt) {
+        if (pkt.type == PacketType::CLN_EVCT) {
+            // Clean eviction notifications are consumed by the snoop.  They
+            // never reach memory, so neither in_range nor pkt.dst (the home
+            // node id) applies here.
+            handle_clean_evict(pkt);
+            return;
+        }
         XerxesLogger::debug()
             << "filter " << pkt.is_coherent() << " " << pkt.is_rsp << " "
             << in_range(pkt.addr) << std::endl;
@@ -778,8 +1024,15 @@ class Snoop : public Device {
                 auto set_i = set_of(pkt.addr);
                 auto way_i = hit_addr_owner(pkt.addr, pkt.dst);
                 if (way_i != -1) {
-                    auto new_state = pkt.is_write() ? MODIFIED : EXCLUSIVE;
-                    pkt.exclusive_grant = true;
+                    // The memory is write-through: a DRAM response always
+                    // carries a clean copy, so the installed line is clean and
+                    // owned, and only a write response conveys write grants.
+                    // A line that still has sharers is shared; only a line
+                    // without them is exclusive.
+                    auto new_state =
+                        cache[set_i][way_i].sharers.empty() ? EXCLUSIVE
+                                                            : SHARED;
+                    pkt.exclusive_grant = pkt.is_write();
                     XerxesLogger::debug()
                         << name() << ": DRAM rsp pkt " << pkt.id << " hit ["
                         << set_i << ":" << way_i << "]" << std::endl;
@@ -805,7 +1058,11 @@ class Snoop : public Device {
           std::string name = "Snoop")
         : Device(sim, name), line_num(config.line_num), assoc(config.assoc),
           set_num(config.line_num / config.assoc),
-          max_burst_inv(config.max_burst_inv), log_inv(false),
+          max_burst_inv(config.max_burst_inv),
+          burst_mode(config.burst_mode),
+          victim_select(config.victim_select),
+          index_hash(config.index_hash),
+          log_inv(false),
           eviction_log_(name + "_eviction",
                         {"burst_size", "target_host", "victim_sharers",
                          "set_idx", "victim_addr"}) {
@@ -844,9 +1101,11 @@ class Snoop : public Device {
         } else {
             PANIC("Unknown eviction policy: " + config.eviction);
         }
-        eviction->is_valid = [this](size_t set_i,
-                                     size_t way_i) -> bool {
-            return cache[set_i][way_i].valid;
+        eviction->is_evictable = [this](size_t set_i,
+                                         size_t way_i) -> bool {
+            auto &line = cache[set_i][way_i];
+            return line.valid && line.state != EVICTING &&
+                   line.state != WAIT_DRAM;
         };
         eviction->sharer_count = [this](size_t set_i,
                                          size_t way_i) -> size_t {
@@ -891,6 +1150,18 @@ class Snoop : public Device {
 
         device_summary("back_inv_count", (double)back_inv_count);
         device_summary("total_inv_packets", (double)total_inv_packets);
+        device_summary("evict_total_count", (double)evict_total_count_);
+
+        device_summary("cln_evct_rx", (double)cln_evct_rx);
+        device_summary("cln_evct_free", (double)cln_evct_free);
+        device_summary("cln_evct_drop_sharer", (double)cln_evct_drop_sharer);
+        device_summary("cln_evct_promote", (double)cln_evct_promote);
+        device_summary("cln_evct_stale", (double)cln_evct_stale);
+        device_summary("cln_evct_busy", (double)cln_evct_busy);
+        device_summary("cln_evct_dirty_reject",
+                       (double)cln_evct_dirty_reject);
+        device_summary("cln_evct_out_of_range",
+                       (double)cln_evct_out_of_range);
 
         if (!evict_sharers_list.empty()) {
             double avg_sharers = 0;

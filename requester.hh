@@ -13,6 +13,7 @@
 #include <random>
 #include <set>
 #include <unordered_set>
+#include <vector>
 
 namespace xerxes {
 class RequesterConfig {
@@ -33,16 +34,78 @@ class RequesterConfig {
     Addr hpa_base = 0;
     size_t hpa_size = 1 << 30;
     double wr_ratio = 0.5;
+    // Emit a CleanEvict notification for every line evicted from a host cache
+    // without a dirty copy.  Off by default: dormant until the Snoop side
+    // knows what to do with the packets.
+    bool clean_evict_notify = false;
+    // Extra per-line cost charged at a requester when it services one INV
+    // packet.  The baseline model charges cache_delay once per packet no
+    // matter how many lines a single InvBlk covers; this switch lets the
+    // burst length actually cost time at the invalidated requester.  Default
+    // 0 keeps every historical result bit-identical.
+    Tick inv_delay_per_line = 0;
+    // Circular phase offset for the stream generator, as a fraction of the
+    // requester's own footprint (0 = start at hpa_base, 0.25 = start a
+    // quarter of the way around and still wrap inside the same window).
+    // Used to give two sweepers the same footprint but different phase, so
+    // the difference is a rotation rather than a displacement.  Default 0
+    // keeps every historical result bit-identical.
+    double stream_phase = 0.0;
+    // Where the per-line INV cost is charged.  "issue" (default) advances the
+    // requester's issue clock, so servicing invalidations steals issue
+    // bandwidth from the local stream.  "service" only delays the INV
+    // completion, modelling an invalidation engine that is busy without
+    // throttling the requester's own issue rate.  Default keeps history.
+    std::string inv_cost_mode = "issue";
 };
 } // namespace xerxes
 
-TOML11_DEFINE_CONVERSION_NON_INTRUSIVE(xerxes::RequesterConfig, q_capacity,
-                                       cache_capacity, cache_delay, issue_delay,
-                                       coherent, burst_size, block_size,
-                                       interleave_type, interleave_param,
-                                       hot_req_ratio, hot_region_ratio,
-                                       trace_file, random_seed, hpa_base,
-                                       hpa_size, wr_ratio);
+// Hand-written instead of TOML11_DEFINE_CONVERSION_NON_INTRUSIVE.  That macro
+// reads every listed key with toml::find(), so appending a field to the list
+// makes any config file written before the field existed throw from
+// from_toml(); parse_config() calls find_or<RequesterConfig>() and silently
+// substitutes a default-constructed RequesterConfig, discarding the whole
+// [Host-0] section.  The documented keys therefore stay mandatory, while the
+// newer clean_evict_notify switch is optional so old configs parse unchanged.
+namespace toml {
+template <> struct from<xerxes::RequesterConfig> {
+    template <typename TC>
+    static xerxes::RequesterConfig from_toml(const basic_value<TC> &v) {
+        xerxes::RequesterConfig obj;
+        obj.q_capacity = find<decltype(obj.q_capacity)>(v, "q_capacity");
+        obj.cache_capacity =
+            find<decltype(obj.cache_capacity)>(v, "cache_capacity");
+        obj.cache_delay = find<decltype(obj.cache_delay)>(v, "cache_delay");
+        obj.issue_delay = find<decltype(obj.issue_delay)>(v, "issue_delay");
+        obj.coherent = find<decltype(obj.coherent)>(v, "coherent");
+        obj.burst_size = find<decltype(obj.burst_size)>(v, "burst_size");
+        obj.block_size = find<decltype(obj.block_size)>(v, "block_size");
+        obj.interleave_type =
+            find<decltype(obj.interleave_type)>(v, "interleave_type");
+        obj.interleave_param =
+            find<decltype(obj.interleave_param)>(v, "interleave_param");
+        obj.hot_req_ratio =
+            find<decltype(obj.hot_req_ratio)>(v, "hot_req_ratio");
+        obj.hot_region_ratio =
+            find<decltype(obj.hot_region_ratio)>(v, "hot_region_ratio");
+        obj.trace_file = find<decltype(obj.trace_file)>(v, "trace_file");
+        obj.random_seed = find<decltype(obj.random_seed)>(v, "random_seed");
+        obj.hpa_base = find<decltype(obj.hpa_base)>(v, "hpa_base");
+        obj.hpa_size = find<decltype(obj.hpa_size)>(v, "hpa_size");
+        obj.wr_ratio = find<decltype(obj.wr_ratio)>(v, "wr_ratio");
+        // Optional: config files predating this switch omit the key entirely.
+        obj.clean_evict_notify =
+            find_or<bool>(v, "clean_evict_notify", false);
+        obj.inv_delay_per_line =
+            find_or<decltype(obj.inv_delay_per_line)>(v, "inv_delay_per_line", 0);
+        obj.stream_phase =
+            find_or<decltype(obj.stream_phase)>(v, "stream_phase", 0.0);
+        obj.inv_cost_mode =
+            find_or<std::string>(v, "inv_cost_mode", std::string("issue"));
+        return obj;
+    }
+};
+} // namespace toml
 
 namespace xerxes {
 class Requester : public Device {
@@ -63,6 +126,8 @@ class Requester : public Device {
         Addr hpa_base = 0;
         size_t hpa_size = 0;
         double wr_ratio = 0.5;
+        // Rotation of the stream start point inside the footprint, fraction.
+        double stream_phase = 0.0;
         size_t block_size;
 
       public:
@@ -141,8 +206,12 @@ class Requester : public Device {
         bool eof() { return cur_count == total_count; }
         Request next() {
             auto n_blocks = hpa_size / block_size;
+            if (n_blocks == 0)
+                n_blocks = 1;
+            size_t start = (size_t)(stream_phase * (double)n_blocks + 0.5) %
+                           n_blocks;
             auto addr =
-                hpa_base + (cur_count % n_blocks) * block_size;
+                hpa_base + ((cur_count + start) % n_blocks) * block_size;
             bool is_write = uni(gen) < wr_ratio;
             cur_count++;
             return {addr, is_write, 0};
@@ -235,32 +304,49 @@ class Requester : public Device {
         struct Entry {
             Addr addr;
             bool writable;
+            // True once this host has actually written the line after
+            // fetching it.  Kept separate from "writable", which is only
+            // the permission to write.
+            bool dirty = false;
         };
 
         std::list<Entry> cache;
+        std::vector<Entry> last_evicted_;
 
       public:
         size_t capacity;
         Tick delay;
+        size_t clean_evict_count = 0;
+        size_t dirty_evict_count = 0;
         FakeLRUCache(size_t capacity, Tick delay)
             : capacity(capacity), delay(delay) {}
-        void insert(Addr addr, bool writable) {
+        void insert(Addr addr, bool writable, bool dirty_in) {
             for (auto it = cache.begin(); it != cache.end(); ++it) {
                 if (it->addr == addr) {
                     it->writable = it->writable || writable;
+                    it->dirty = it->dirty || dirty_in;
                     auto entry = *it;
                     cache.erase(it);
                     cache.push_back(entry);
                     return;
                 }
             }
-            if (cache.size() >= capacity)
+            if (cache.size() >= capacity) {
+                auto victim = cache.front();
+                last_evicted_.push_back(victim);
+                if (victim.dirty)
+                    ++dirty_evict_count;
+                else
+                    ++clean_evict_count;
                 cache.pop_front();
-            cache.push_back({addr, writable});
+            }
+            cache.push_back({addr, writable, dirty_in});
         }
         bool hit(Addr addr, bool is_write) {
             for (auto it = cache.begin(); it != cache.end(); ++it) {
                 if (it->addr == addr && (!is_write || it->writable)) {
+                    if (is_write)
+                        it->dirty = true;
                     auto entry = *it;
                     cache.erase(it);
                     cache.push_back(entry);
@@ -269,6 +355,8 @@ class Requester : public Device {
             }
             return false;
         }
+        void clear_evicted() { last_evicted_.clear(); }
+        const std::vector<Entry> &evicted() const { return last_evicted_; }
         void invalidate(Addr addr) {
             for (auto it = cache.begin(); it != cache.end(); ++it) {
                 if (it->addr == addr) {
@@ -307,8 +395,17 @@ class Requester : public Device {
     size_t cur_cnt = 0;
     Tick issue_delay;
     bool coherent;
+    // Set when step() declines to issue because the queue is full.  The
+    // matching issue_event() turns this into a later retry instead of letting
+    // the requester fall silent until some unrelated event wakes it up.
+    bool retry_pending_ = false;
+    bool clean_evict_notify = false;
+    Tick inv_delay_per_line = 0;
+    std::string inv_cost_mode = "issue";
     size_t burst_size = 1;
     size_t block_size = 64;
+    size_t cln_evct_sent = 0;
+    size_t cln_evct_invalid_addr = 0;
 
     std::unordered_map<std::string, std::unordered_map<std::string, double>>
         stats;
@@ -319,6 +416,9 @@ class Requester : public Device {
         : Device(sim, name), q(config.q_capacity),
           cache(config.cache_capacity, config.cache_delay),
           issue_delay(config.issue_delay), coherent(config.coherent),
+          clean_evict_notify(config.clean_evict_notify),
+          inv_delay_per_line(config.inv_delay_per_line),
+          inv_cost_mode(config.inv_cost_mode),
           burst_size(config.burst_size), block_size(config.block_size) {
         XerxesLogger::debug()
             << "Interleave param " << config.interleave_param << std::endl;
@@ -341,6 +441,7 @@ class Requester : public Device {
             PANIC("Unknown interleave type: " + config.interleave_type);
         }
         hpa_gen_->hpa_base = config.hpa_base;
+        hpa_gen_->stream_phase = config.stream_phase;
         hpa_gen_->hpa_size = config.hpa_size;
         hpa_gen_->wr_ratio = config.wr_ratio;
         if (auto rnd = dynamic_cast<Random *>(hpa_gen_))
@@ -366,9 +467,44 @@ class Requester : public Device {
                     << ", issue queue is full? " << q.full() << std::endl;
                 last_arrive = pkt.arrive;
                 if (coherent) {
+                    cache.clear_evicted();
                     for (size_t i = 0; i < pkt.burst; ++i) {
                         cache.insert(pkt.addr + i * block_size,
-                                     pkt.exclusive_grant || pkt.is_write());
+                                     pkt.exclusive_grant || pkt.is_write(),
+                                     pkt.is_write());
+                    }
+                    // A clean line dropped here no longer exists in any host
+                    // cache, which the home node must be told about.  This is
+                    // a one-way notification: it never enters the issue queue
+                    // and never produces a response.
+                    if (clean_evict_notify) {
+                        for (const auto &entry : cache.evicted()) {
+                            if (entry.dirty)
+                                continue;
+                            auto qr =
+                                sim->address_system()->query(entry.addr);
+                            if (!qr.valid) {
+                                ++cln_evct_invalid_addr;
+                                continue;
+                            }
+                            auto cln = PktBuilder()
+                                           .type(CLN_EVCT)
+                                           .src(self)
+                                           .dst(qr.dpid)
+                                           .addr(entry.addr)
+                                           .dpa(qr.dpa)
+                                           .payload(0)
+                                           .burst(1)
+                                           .sent(pkt.arrive)
+                                           .is_rsp(false)
+                                           .build();
+                            XerxesLogger::debug()
+                                << name() << ": clean evict notification "
+                                << cln.id << ", addr " << entry.addr
+                                << ", target " << qr.dpid << std::endl;
+                            send_pkt(cln);
+                            ++cln_evct_sent;
+                        }
                     }
                 }
 
@@ -386,8 +522,14 @@ class Requester : public Device {
                 stats[dram_key]["Average wait for evict"] +=
                     pkt.get_stat(SNOOP_EVICT_DELAY);
 
-                if (q.full())
+                // A response frees one issue slot.  Wake the issuer when the
+                // queue was full, and also when a previous attempt was
+                // deferred because the queue was full at that time; the retry
+                // in issue_event() may have chosen not to schedule itself.
+                if (q.full() || retry_pending_) {
+                    retry_pending_ = false;
                     register_issue_event(pkt.arrive);
+                }
                 q.pop(pkt);
                 pkt.log_stat();
             } else if (pkt.type == INV) {
@@ -398,9 +540,12 @@ class Requester : public Device {
                     std::swap(pkt.src, pkt.dst);
                     pkt.is_rsp = true;
                     pkt.payload = block_size * pkt.burst;
-                    pkt.arrive += cache.delay;
-                    pkt.delta_stat(NormalStatType::HOST_INV_DELAY, cache.delay);
-                    cur = std::max(cur, pkt.arrive) + issue_delay;
+                    Tick inv_cost = cache.delay + inv_delay_per_line * pkt.burst;
+                    pkt.arrive += inv_cost;
+                    pkt.delta_stat(NormalStatType::HOST_INV_DELAY, inv_cost);
+                    // "service": pay the cost on the INV completion only.
+                    if (inv_cost_mode != "service")
+                        cur = std::max(cur, pkt.arrive) + issue_delay;
                     send_pkt(pkt);
                 }
             }
@@ -462,6 +607,13 @@ class Requester : public Device {
         device_summary("req_count", (double)cur_cnt);
         device_summary("cache_hit_count", stats["-1"]["Cache hit count"]);
         device_summary("cache_evict_count", stats["-1"]["Cache evict count"]);
+        device_summary("cache_clean_evict_count",
+                       (double)cache.clean_evict_count);
+        device_summary("cache_dirty_evict_count",
+                       (double)cache.dirty_evict_count);
+        device_summary("cln_evct_sent", (double)cln_evct_sent);
+        device_summary("cln_evct_invalid_addr",
+                       (double)cln_evct_invalid_addr);
         if (agg_cnt > 0) {
             device_summary("bw_gbps", agg_bw);
             device_summary("avg_latency_ns", agg_lat / agg_cnt);
@@ -518,8 +670,13 @@ class Requester : public Device {
             if (q.full()) {
                 if (cur < last_arrive)
                     cur = last_arrive;
+                // The trace still has work.  Remember that this refusal is a
+                // transient capacity limit, not the end of the stream, so
+                // issue_event() can schedule a retry once the queue drains.
+                retry_pending_ = true;
                 return false;
             }
+            retry_pending_ = false;
             auto req = hpa_gen_->next();
             auto qr = sim->address_system()->query(req.hpa);
             if (!qr.valid) {
@@ -578,6 +735,9 @@ class Requester : public Device {
             cur_cnt++;
             return true;
         } else {
+            // End of trace: never retry here, or the requester would keep
+            // scheduling itself forever with nothing left to issue.
+            retry_pending_ = false;
             if (!ended) {
                 ended = true;
             }
@@ -585,14 +745,27 @@ class Requester : public Device {
         return false;
     }
 
-    void issue_event() {
+    void issue_event(Tick tick) {
         if (step(coherent)) {
             register_issue_event(cur);
+        } else if (retry_pending_) {
+            // The queue frees space only when a response arrives.  Re-check at
+            // the later of the issue cursor and the most recent arrival when
+            // that is genuinely in the future.  If it is not, leave the flag
+            // set and let transit() wake us on the next response: scheduling
+            // at (or before) this event's own tick would spin without making
+            // the simulation advance.  In particular the first full-queue hit
+            // happens at tick 0, before any response can possibly return.
+            Tick retry = std::max(cur, last_arrive);
+            if (retry > tick) {
+                retry_pending_ = false;
+                register_issue_event(retry);
+            }
         }
     }
 
     void register_issue_event(Tick tick) {
-        xerxes_schedule([this]() { this->issue_event(); }, tick);
+        xerxes_schedule([this, tick]() { this->issue_event(tick); }, tick);
     }
 
     bool all_issued() { return hpa_gen_->eof(); }

@@ -39,6 +39,11 @@ class DRAMsim3Interface : public Device {
     Tick interface_clock = 0;
     Tick process_time;
 
+    // Packets that reached the DRAM interface but are not memory requests.
+    // Such packets must never reach DRAM; they are dropped and counted so
+    // that any leak is observable as a non-zero summary metric.
+    size_t unexpected_pkt_ = 0;
+
     dramsim3::MemorySystem memsys;
 
     // Issue packets to the DRAM system.
@@ -92,18 +97,35 @@ class DRAMsim3Interface : public Device {
         auto pkt = receive_pkt();
         while (pkt.type != PacketType::PKT_TYPE_NUM) {
             if (pkt.dst == self) {
-                XerxesLogger::debug()
-                    << name() << " receive packet " << pkt.id << " from "
-                    << pkt.from << " at " << pkt.arrive << std::endl;
-                pkt.delta_stat(DEVICE_PROCESS_TIME, (double)(process_time));
-                pkt.arrive += process_time;
-                pending.push_back(pkt);
+                // Only memory requests may enter DRAM; anything else (e.g. a
+                // clean eviction notification) is dropped and counted.
+                if (pkt.type != PacketType::RD && pkt.type != PacketType::WT &&
+                    pkt.type != PacketType::NT_RD &&
+                    pkt.type != PacketType::NT_WT) {
+                    if (unexpected_pkt_ == 0)
+                        XerxesLogger::warning()
+                            << name() << " dropping unexpected packet "
+                            << pkt.id << " of type " << TypeName::of(pkt.type)
+                            << " from " << pkt.from << std::endl;
+                    ++unexpected_pkt_;
+                } else {
+                    XerxesLogger::debug()
+                        << name() << " receive packet " << pkt.id << " from "
+                        << pkt.from << " at " << pkt.arrive << std::endl;
+                    pkt.delta_stat(DEVICE_PROCESS_TIME, (double)(process_time));
+                    pkt.arrive += process_time;
+                    pending.push_back(pkt);
+                }
             } else {
                 send_pkt(pkt);
             }
             pkt = receive_pkt();
         }
         return issue();
+    }
+
+    void collect_summary() override {
+        device_summary("unexpected_pkt", (double)unexpected_pkt_);
     }
 
     // Callback function called by DRAMsim3 when a packet is completed.
@@ -135,8 +157,20 @@ class DRAMsim3Interface : public Device {
     Tick clock() {
         auto num = issued.size();
         if (num == 0) {
-            if (!pending.empty())
+            if (!pending.empty()) {
                 issue();
+                // Every pending request was rejected, yet the controller has
+                // no transaction in flight.  A completed transaction only
+                // releases its queue slot on the next ClockTick(), so the
+                // controller must be advanced here.  Without this, a fabric
+                // that has gone idle (no event left to call clock()) would
+                // wait forever for a response that this queue still owes.
+                if (!pending.empty() && issued.empty()) {
+                    memsys.ClockTick();
+                    ++interface_clock;
+                    issue();
+                }
+            }
             return interface_clock * tick_per_clock;
         }
         memsys.ClockTick();
