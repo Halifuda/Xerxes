@@ -4,15 +4,20 @@ debug/
 output/
 !output/
 output/*
+!output/plot_*.py
 !output/report.py
 !output/congestion_correlation.py
 
 
 .cache/
+__pycache__/
+*.pyc
 configs/mkcfg/__pycache__/
 
 output/fig*/
+configs/fig*/
 output/baseline-*.csv
 output/dramsim3epoch.json
 
 results/
+figures/
